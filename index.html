@@ -147,6 +147,7 @@ label.flabel{font-size:11.5px;color:var(--text-dim);font-weight:600;margin-botto
 
 #printArea{display:none;}
 @media print{
+  @page { size: auto; margin: 8mm 12mm; }
   body > *:not(#printArea){display:none !important;}
   #printArea{display:block !important;position:static;width:280px;padding:10px;color:#000;background:#fff;}
   #printArea.print-letter{width:100%;padding:30px 40px;}
@@ -533,7 +534,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
 
     <!-- CARTERA -->
     <section class="view" id="view-cartera">
-      <div class="grid grid-3" id="carteraKpi"></div>
+      <div class="grid grid-3" id="carteraKpi" style="margin-bottom:16px"></div>
       <div class="flex-between" style="align-items:center;flex-wrap:wrap;gap:10px;">
         <input class="input" id="carteraSearch" placeholder="Buscar por número de factura o cliente…" style="max-width:400px;">
         <button class="btn btn-green btn-sm" id="btnAddCarteraOld">+ Agregar cartera antigua</button>
@@ -624,6 +625,10 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           <button class="btn btn-ghost" id="btnRepDetHoy" style="padding:10px 14px;">Hoy</button>
           <button class="btn btn-ghost" id="btnRepDetMesActual" style="padding:10px 14px;">Mes actual</button>
           <button class="btn btn-ghost" id="btnRepDetAnioActual" style="padding:10px 14px;">Año actual</button>
+          <select class="input" id="repDetModo" style="padding:10px 8px;font-size:13px;width:auto;">
+            <option value="facturas">Ver facturas detalladas</option>
+            <option value="cierres">Ver cierres del período</option>
+          </select>
           <button class="btn btn-ghost" id="btnRepDetImprimirCarta" style="padding:10px 14px;">📄 Imprimir tamaño carta</button>
         </div>
         <div class="grid grid-4" id="repDetKpi"></div>
@@ -631,7 +636,12 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           <div class="card"><div class="section-title">Ventas vs. Gastos por período</div><canvas id="chartRepDetVG" height="220"></canvas></div>
           <div class="card"><div class="section-title">Ventas por forma de pago (rango)</div><canvas id="chartRepDetPago" height="220"></canvas></div>
         </div>
-        <table class="mt16"><thead><tr><th id="repDetColLabel">Período</th><th>Facturas</th><th>Ventas</th><th>Gastos</th><th>Utilidad</th></tr></thead><tbody id="repDetBody"></tbody></table>
+        <div id="repDetTablaWrap" class="mt16">
+          <table><thead><tr><th id="repDetColLabel">Período</th><th>Facturas</th><th>Ventas</th><th>Gastos</th><th>Utilidad</th></tr></thead><tbody id="repDetBody"></tbody></table>
+        </div>
+        <div id="repDetCierresWrap" class="mt16" style="display:none;">
+          <table><thead><tr><th>Fecha cierre</th><th>Facturas</th><th>Total recibido</th><th>Efectivo</th><th>Gastos</th><th>Sueldo</th><th>A guardar</th></tr></thead><tbody id="repDetCierresBody"></tbody></table>
+        </div>
       </div>
       <div class="card mt16">
         <div class="flex-between">
@@ -644,20 +654,6 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
             <th>Año</th><th>Ene</th><th>Feb</th><th>Mar</th><th>Abr</th><th>May</th><th>Jun</th><th>Jul</th><th>Ago</th><th>Sep</th><th>Oct</th><th>Nov</th><th>Dic</th><th>Total anual</th><th>Crecim.</th><th></th>
           </tr></thead><tbody id="historicoBody"></tbody></table>
         </div>
-      </div>
-      <div class="card mt16">
-        <div class="flex-between">
-          <div class="section-title mb0">Reporte <span id="reporteMensualLabel">mensual</span></div>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <select class="input" id="reportePeriodoSelect" style="padding:6px 8px;font-size:12px;width:auto;">
-              <option value="mensual">Mensual</option>
-              <option value="anual">Anual</option>
-            </select>
-            <button class="btn btn-ghost btn-sm" id="btnImprimirReporteTicket" title="Imprimir en formato ticket">🖨️ Ticket</button>
-            <button class="btn btn-ghost btn-sm" id="btnImprimirReporteMensual" title="Imprimir en formato carta">🖨️ Carta</button>
-          </div>
-        </div>
-        <table class="mt8"><thead><tr><th id="reporteMensualColLabel">Mes</th><th>Facturas</th><th>Total vendido</th></tr></thead><tbody id="reporteMensualBody"></tbody></table>
       </div>
     </section>
 
@@ -2483,74 +2479,6 @@ document.getElementById('btnRepDetAnioActual')?.addEventListener('click', ()=>{
   document.getElementById('repDetAgrupar').value = 'mes';
   renderReporteDetallado();
 });
-document.getElementById('reportePeriodoSelect')?.addEventListener('change', renderReportes);
-document.getElementById('btnImprimirReporteMensual')?.addEventListener('click', printReporteMensual);
-document.getElementById('btnImprimirReporteTicket')?.addEventListener('click', printReporteMensualTicket);
-function printReporteMensualTicket(){
-  if(!lastReportePeriodo || !lastReportePeriodo.mKeys.length){ toast('No hay datos para imprimir'); return; }
-  const {periodo, monthly, mKeys} = lastReportePeriodo;
-  const totalGeneral = mKeys.reduce((a,k)=>a+monthly[k].total,0);
-  const totalFacturas = mKeys.reduce((a,k)=>a+monthly[k].count,0);
-  const area = document.getElementById('printArea');
-  area.classList.remove('print-letter');
-  area.innerHTML = `
-    <div style="text-align:center;font-family:'Segoe UI',Arial,sans-serif;max-width:380px;margin:0 auto;">
-      ${LOGO?`<img src="${LOGO}" style="max-width:90px;max-height:90px;object-fit:contain;margin-bottom:6px;">`:''}
-      <h2 style="margin:4px 0;">${STUDIO.name}</h2>
-      <div style="font-size:11.5px;color:#444;">${STUDIO.nit}<br>${STUDIO.addr}<br>${STUDIO.phone}</div>
-      <hr>
-      <div style="font-size:13px;font-weight:bold;">REPORTE ${periodo==='anual'?'ANUAL':'MENSUAL'}</div>
-      <div style="font-size:11.5px;color:#444;">Generado: ${new Date().toLocaleString('es-CO')}</div>
-      <hr>
-      <table style="width:100%;font-size:12px;border-collapse:collapse;">
-        <thead><tr><td style="text-align:left;border-bottom:1px solid #999;"><b>${periodo==='anual'?'Año':'Mes'}</b></td><td style="text-align:center;border-bottom:1px solid #999;"><b>Fact.</b></td><td style="text-align:right;border-bottom:1px solid #999;"><b>Total</b></td></tr></thead>
-        ${mKeys.map(k=>`<tr><td style="text-align:left;padding:3px 0;">${k}</td><td style="text-align:center;">${monthly[k].count}</td><td style="text-align:right;">${money(monthly[k].total)}</td></tr>`).join('')}
-      </table>
-      <hr>
-      <div style="font-size:12px;">Total facturas: <b>${totalFacturas}</b></div>
-      <div style="text-align:right;font-weight:bold;font-size:14px;">TOTAL: ${money(totalGeneral)}</div>
-      <hr>
-      <div style="font-size:11px;color:#666;">Generado por Studio Manager</div>
-    </div>`;
-  setTimeout(()=>window.print(), 50);
-}
-function printReporteMensual(){
-  if(!lastReportePeriodo || !lastReportePeriodo.mKeys.length){ toast('No hay datos para imprimir'); return; }
-  const {periodo, monthly, mKeys} = lastReportePeriodo;
-  const totalGeneral = mKeys.reduce((a,k)=>a+monthly[k].total,0);
-  const area = document.getElementById('printArea');
-  area.classList.add('print-letter');
-  area.innerHTML = `
-    <div style="font-family:'Segoe UI',Arial,sans-serif;color:#000;">
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #7c5cff;padding-bottom:14px;margin-bottom:18px;">
-        <div style="display:flex;gap:14px;align-items:center;">
-          ${LOGO?`<img src="${LOGO}" style="max-width:60px;max-height:60px;object-fit:contain;">`:''}
-          <div>
-            <div style="font-size:18px;font-weight:700;">${STUDIO.name}</div>
-            <div style="font-size:11.5px;color:#555;">${STUDIO.nit}<br>${STUDIO.addr}</div>
-          </div>
-        </div>
-        <div style="text-align:right;">
-          <div style="font-size:18px;font-weight:700;color:#7c5cff;">REPORTE ${periodo==='anual'?'ANUAL':'MENSUAL'}</div>
-          <div style="font-size:12px;color:#555;">Generado: ${new Date().toLocaleString('es-CO')}</div>
-        </div>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead><tr style="background:#f1f1f4;">
-          <th style="text-align:left;padding:8px;border-bottom:2px solid #ddd;">${periodo==='anual'?'Año':'Mes'}</th>
-          <th style="text-align:center;padding:8px;border-bottom:2px solid #ddd;">Facturas</th>
-          <th style="text-align:right;padding:8px;border-bottom:2px solid #ddd;">Total vendido</th>
-        </tr></thead>
-        <tbody>
-        ${mKeys.map(k=>`<tr><td style="padding:8px;border-bottom:1px solid #eee;">${k}</td><td style="text-align:center;padding:8px;border-bottom:1px solid #eee;">${monthly[k].count}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #eee;">${money(monthly[k].total)}</td></tr>`).join('')}
-        </tbody>
-      </table>
-      <div style="display:flex;justify-content:flex-end;margin-top:14px;">
-        <div style="font-size:15px;font-weight:700;border-top:2px solid #333;padding-top:8px;width:280px;display:flex;justify-content:space-between;"><span>TOTAL GENERAL</span><span>${money(totalGeneral)}</span></div>
-      </div>
-    </div>`;
-  setTimeout(()=>{ window.print(); area.classList.remove('print-letter'); }, 50);
-}
 
 /* ================= INVENTARIOS (STOCK) ================= */
 function renderInvStockFilters(){
@@ -2816,36 +2744,6 @@ function renderReportes(){
   // Histórico de años anteriores (tabla manual editable)
   renderHistorico();
 
-  // Reporte mensual / anual
-  const periodo = document.getElementById('reportePeriodoSelect')?.value || 'mensual';
-  const monthly = {};
-  function addMonthlyEntry(k, sortKey, count, total){
-    if(!monthly[k]) monthly[k] = {count:0, total:0, sortKey};
-    monthly[k].count += count; monthly[k].total += total;
-  }
-  validSales.forEach(s=>{
-    const k = periodo==='anual' ? String(s.date.getFullYear()) : s.date.toLocaleDateString('es-CO',{month:'long',year:'numeric'});
-    const sortKey = periodo==='anual' ? s.date.getFullYear() : new Date(s.date.getFullYear(), s.date.getMonth(), 1).getTime();
-    addMonthlyEntry(k, sortKey, 1, s.total);
-  });
-  Object.keys(state.historico||{}).forEach(anio=>{
-    const meses = state.historico[anio] || [];
-    meses.forEach((v, mIdx)=>{
-      const val = parseFloat(v)||0;
-      if(!val) return;
-      const k = periodo==='anual' ? String(anio) : new Date(parseInt(anio,10), mIdx, 1).toLocaleDateString('es-CO',{month:'long',year:'numeric'});
-      const sortKey = periodo==='anual' ? parseInt(anio,10) : new Date(parseInt(anio,10), mIdx, 1).getTime();
-      addMonthlyEntry(k, sortKey, 0, val);
-    });
-  });
-  const mKeys = Object.keys(monthly).sort((a,b)=>monthly[a].sortKey - monthly[b].sortKey);
-  lastReportePeriodo = {periodo, monthly, mKeys};
-  document.getElementById('reporteMensualLabel').textContent = periodo==='anual' ? 'anual' : 'mensual';
-  document.getElementById('reporteMensualColLabel').textContent = periodo==='anual' ? 'Año' : 'Mes';
-  document.getElementById('reporteMensualBody').innerHTML = mKeys.length ? mKeys.map(k=>`
-    <tr><td>${k}</td><td>${monthly[k].count}</td><td><b>${money(monthly[k].total)}</b></td></tr>`).join('')
-    : `<tr><td colspan="3" class="text-dim">Sin datos todavía</td></tr>`;
-
   // Historial de cierres
   document.getElementById('cierreHistCount').textContent = state.cashClosures.length + " cierres";
   const closures = state.cashClosures.map((c,i)=>({c,i}));
@@ -2940,9 +2838,31 @@ function renderReporteDetallado(){
   }).join('') : `<tr><td colspan="5" class="text-dim">Sin datos en este período</td></tr>`;
 
   lastRepDetallado = { desdeStr, hastaStr, agrupar, periods, pKeys, totalVentas, totalGastos, totalFacturas, utilidad };
+
+  // Modo: facturas vs cierres
+  const modo = document.getElementById('repDetModo')?.value || 'facturas';
+  const tablaWrap = document.getElementById('repDetTablaWrap');
+  const cierresWrap = document.getElementById('repDetCierresWrap');
+  if(tablaWrap) tablaWrap.style.display = modo==='facturas' ? '' : 'none';
+  if(cierresWrap) cierresWrap.style.display = modo==='cierres' ? '' : 'none';
+  if(modo==='cierres'){
+    const cierresEnRango = state.cashClosures.filter(c=>inRange(c.date)).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+    document.getElementById('repDetCierresBody').innerHTML = cierresEnRango.length
+      ? cierresEnRango.map(c=>`<tr>
+          <td>${new Date(c.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'})}</td>
+          <td>${c.count}</td>
+          <td><b>${money(c.ventas||0)}</b></td>
+          <td>${money(c.ingresoEfectivo||0)}</td>
+          <td>${money(c.gastosTotal||0)}</td>
+          <td>${money(c.sueldoMethod==='Efectivo'?(c.sueldo||0):0)}</td>
+          <td><b style="color:var(--green)">${money(c.efectivoGuardar||0)}</b></td>
+        </tr>`).join('')
+      : `<tr><td colspan="7" class="text-dim">Sin cierres en este período</td></tr>`;
+  }
 }
 let lastRepDetallado = null;
 document.getElementById('btnRepDetImprimirCarta')?.addEventListener('click', printRepDetalladoLetter);
+document.getElementById('repDetModo')?.addEventListener('change', renderReporteDetallado);
 function printRepDetalladoLetter(){
   if(!lastRepDetallado || !lastRepDetallado.pKeys.length){ toast('No hay datos para imprimir'); return; }
   const {desdeStr, hastaStr, agrupar, periods, pKeys, totalVentas, totalGastos, totalFacturas, utilidad} = lastRepDetallado;
@@ -2989,6 +2909,17 @@ function printRepDetalladoLetter(){
   setTimeout(()=>{ window.print(); area.classList.remove('print-letter'); }, 50);
 }
 
+function setCotejoStatus(sid, pidx, nuevoEstado){
+  const sale = state.sales.find(x=>x.id===sid);
+  if(sale && sale.payments && sale.payments[pidx]){
+    sale.payments[pidx].verifiedStatus = nuevoEstado;
+    saveState();
+    closeModal();
+    renderCotejoBanco();
+    const labels = {null:'Sin verificar', ok:'Revisado', novedad:'Novedad registrada', problema:'Problema registrado'};
+    toast(labels[nuevoEstado] || 'Estado actualizado');
+  }
+}
 function renderCotejoBanco(){
   const desdeStr = document.getElementById('cotejofechaDesde')?.value || '';
   const hastaStr = document.getElementById('cotejofechaHasta')?.value || '';
@@ -3019,17 +2950,30 @@ function renderCotejoBanco(){
         <td>${client}</td>
         <td><b>${money(p.amount)}</b></td>
         <td>${p.method}</td>
-        <td style="text-align:center;"><input type="checkbox" class="cotejo-check" data-sale="${saleId}" data-idx="${idx}" ${p.verified?'checked':''}></td>
+        <td style="text-align:center;">${(()=>{
+          const st = p.verifiedStatus||null;
+          let bg='#e5e7eb',col='#6b7280',txt='Sin verificar';
+          if(st==='ok'){bg='#d1fae5';col='#065f46';txt='✓ Revisado';}
+          else if(st==='novedad'){bg='#fef3c7';col='#92400e';txt='⚠️ Novedad';}
+          else if(st==='problema'){bg='#fee2e2';col='#991b1b';txt='✗ Problema';}
+          return `<button class="cotejo-status-btn" data-sale="${saleId}" data-idx="${idx}" style="background:${bg};color:${col};border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;font-weight:600;white-space:nowrap;">${txt}</button>`;
+        })()}</td>
       </tr>`).join('');
-    cotejoBody.querySelectorAll('.cotejo-check').forEach(chk=>{
-      chk.addEventListener('change', e=>{
-        const sid = parseInt(e.target.dataset.sale), pidx = parseInt(e.target.dataset.idx);
-        const sale = state.sales.find(x=>x.id===sid);
-        if(sale && sale.payments[pidx]){
-          sale.payments[pidx].verified = e.target.checked;
-          saveState();
-          toast(e.target.checked ? 'Transacción verificada' : 'Verificación removida');
-        }
+    cotejoBody.querySelectorAll('.cotejo-status-btn').forEach(btn=>{
+      btn.addEventListener('click', e=>{
+        const sid = parseInt(e.currentTarget.dataset.sale), pidx = parseInt(e.currentTarget.dataset.idx);
+        requireAnularPassword(()=>{
+          document.getElementById('modalTitle').textContent = 'Estado de verificación';
+          document.getElementById('modalBody').innerHTML = `
+            <p style="font-size:13px;margin-bottom:14px;color:var(--text-dim);">Selecciona el estado para este pago:</p>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <button onclick="setCotejoStatus(${sid},${pidx},null)" style="background:#e5e7eb;color:#6b7280;border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;text-align:left;">— Sin verificar</button>
+              <button onclick="setCotejoStatus(${sid},${pidx},'ok')" style="background:#d1fae5;color:#065f46;border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;text-align:left;">✓ Revisado</button>
+              <button onclick="setCotejoStatus(${sid},${pidx},'novedad')" style="background:#fef3c7;color:#92400e;border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;text-align:left;">⚠️ Novedad</button>
+              <button onclick="setCotejoStatus(${sid},${pidx},'problema')" style="background:#fee2e2;color:#991b1b;border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;text-align:left;">✗ Problema</button>
+            </div>`;
+          openModal();
+        });
       });
     });
   }
@@ -3742,6 +3686,51 @@ function printCierreLetter(i){
           ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="margin-top:8px;font-size:12px;color:#555;">Sueldo pagado digital: ${money(snap.sueldo)}</div>`:''}
         </div>
       </div>
+      ${(()=>{
+        const dayStr = new Date(snap.date).toDateString();
+        const isDay = d => new Date(d).toDateString() === dayStr;
+        const dayInvoices = [];
+        state.sales.filter(s=>s.status!=='Anulada').forEach(s=>{
+          const dayPays = (s.payments&&s.payments.length?s.payments:[{date:s.date,amount:s.total,method:s.pay||'Efectivo'}]).filter(p=>isDay(new Date(p.date)));
+          if(!dayPays.length) return;
+          const dayPaid = dayPays.reduce((a,p)=>a+p.amount,0);
+          const saldo = saleSaldo(s);
+          const tipo = saldo<=0.01 ? 'Saldo total' : 'Abono';
+          const desc = (s.items||[]).map(it=>it.nombre||it.name||'').filter(Boolean).join(', ') || '—';
+          dayInvoices.push({id:s.id, date:s.date, client:s.client, desc, total:s.total, dayPaid, tipo, method: dayPays.map(p=>p.method).join('/')});
+        });
+        dayInvoices.sort((a,b)=>new Date(a.date)-new Date(b.date));
+        return `<div style="margin-top:24px;">
+  <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#7c5cff;border-bottom:2px solid #7c5cff;padding-bottom:6px;">DETALLE DE FACTURAS DEL DÍA</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <thead>
+      <tr style="background:#f3f0ff;">
+        <th style="padding:8px 8px;text-align:left;border-bottom:2px solid #7c5cff;">#</th>
+        <th style="padding:8px 8px;text-align:left;border-bottom:2px solid #7c5cff;">Cliente</th>
+        <th style="padding:8px 8px;text-align:left;border-bottom:2px solid #7c5cff;">Descripción</th>
+        <th style="padding:8px 8px;text-align:right;border-bottom:2px solid #7c5cff;">Total fac.</th>
+        <th style="padding:8px 8px;text-align:right;border-bottom:2px solid #7c5cff;">Recibido</th>
+        <th style="padding:8px 8px;text-align:center;border-bottom:2px solid #7c5cff;">Tipo</th>
+        <th style="padding:8px 8px;text-align:left;border-bottom:2px solid #7c5cff;">Pago</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${dayInvoices.length ? dayInvoices.map(inv=>`
+        <tr>
+          <td style="padding:7px 8px;border-bottom:1px solid #eee;">#${inv.id}</td>
+          <td style="padding:7px 8px;border-bottom:1px solid #eee;">${inv.client}</td>
+          <td style="padding:7px 8px;border-bottom:1px solid #eee;max-width:180px;">${inv.desc}</td>
+          <td style="padding:7px 8px;border-bottom:1px solid #eee;text-align:right;">${money(inv.total)}</td>
+          <td style="padding:7px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:700;">${money(inv.dayPaid)}</td>
+          <td style="padding:7px 8px;border-bottom:1px solid #eee;text-align:center;">
+            <span style="background:${inv.tipo==='Saldo total'?'#d1fae5':'#fef3c7'};color:${inv.tipo==='Saldo total'?'#065f46':'#92400e'};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${inv.tipo}</span>
+          </td>
+          <td style="padding:7px 8px;border-bottom:1px solid #eee;">${inv.method}</td>
+        </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;padding:12px;color:#777;">Sin facturas registradas para este día</td></tr>'}
+    </tbody>
+  </table>
+</div>`;
+      })()}
       <div style="margin-top:20px;border-top:1px solid #ddd;padding-top:10px;text-align:center;font-size:11px;color:#888;">Generado por Studio Manager · ${new Date().toLocaleString('es-CO')}</div>
     </div>`;
   setTimeout(()=>{ window.print(); area.classList.remove('print-letter'); }, 50);
