@@ -231,12 +231,18 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
 
 /* INVENTORY */
 .inv-row{display:grid;grid-template-columns:1fr 130px 110px 120px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;}
+.inv-row.inv-row-tallas{grid-template-columns:200px 1fr;align-items:start;}
 .inv-row.head{font-weight:700;color:var(--text-dim);font-size:11px;text-transform:uppercase;}
 .inv-stock-input{width:70px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12.5px;text-align:center;}
 .inv-size-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
 .inv-size-cell{display:flex;align-items:center;gap:5px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:5px 8px;}
 .inv-size-cell label{font-size:11px;font-weight:700;color:var(--text-dim);}
 .inv-size-cell input{width:52px;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:5px;font-size:12px;text-align:center;}
+.inv-talla-matrix{display:grid;grid-template-columns:28px 68px 100px 70px 80px;gap:5px 8px;align-items:center;padding:4px 0;}
+.inv-talla-matrix .itm-hdr{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;text-align:center;}
+.inv-talla-matrix .itm-label{font-size:12px;font-weight:700;color:var(--text);text-align:center;}
+.inv-talla-matrix input.inv-talla-input{width:62px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:5px 6px;border-radius:6px;font-size:12px;text-align:center;}
+.inv-talla-matrix input.inv-add-talla{width:62px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:5px 6px;border-radius:6px;font-size:12px;text-align:center;}
 .stock-pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;}
 .stock-ok{background:var(--green-soft);color:var(--green);}
 .stock-low{background:var(--yellow-soft);color:var(--yellow);}
@@ -1345,7 +1351,7 @@ let invStockFilterCat = "TODAS";
 let invShowAgotados = false;
 let lastReportePeriodo = null;
 const DIGITAL_PAYS = ["Nequi","Daviplata","BRE-B","QR"];
-const TALLAS_ADULTO  = ["S","M","L","XL","XXL"];
+const TALLAS_ADULTO  = ["S","M","L","XL"];
 const TALLAS_NINO    = ["2","4","6","8","10","12","14","16"];
 const TALLAS_DEFECTO = TALLAS_ADULTO; // alias de compatibilidad
 
@@ -2571,19 +2577,40 @@ function renderInvStock(){
   }
   cont.innerHTML = list.map(p=>{
     const idx = PRODUCTS.indexOf(p);
-    let existencias;
     if(p.usaTallas){
-      existencias = `<div class="inv-size-grid">${getTallas(p).map(t=>`
-        <div class="inv-size-cell"><label>${t}</label><input type="number" min="0" data-idx="${idx}" data-talla="${t}" class="inv-talla-input" value="${parseInt(p.tallas[t])||0}"></div>`).join('')}</div>`;
+      // Fila especial: una mini-tabla con una línea por talla
+      const tallas = getTallas(p);
+      const encabezado = `
+        <div class="itm-hdr">Talla</div>
+        <div class="itm-hdr">Existencias</div>
+        <div class="itm-hdr">Estado</div>
+        <div class="itm-hdr">+ Cantidad</div>
+        <div class="itm-hdr">Acción</div>`;
+      const filas = tallas.map(t=>{
+        const av = parseInt(p.tallas[t])||0;
+        let pill;
+        if(av<=0) pill=`<span class="stock-pill stock-out" style="font-size:10px;">Agotado</span>`;
+        else if(av<=(p.stockMin||3)) pill=`<span class="stock-pill stock-low" style="font-size:10px;">Bajo · ${av}</span>`;
+        else pill=`<span class="stock-pill stock-ok" style="font-size:10px;">${av} und</span>`;
+        return `
+          <div class="itm-label">${t}</div>
+          <input type="number" min="0" class="inv-talla-input" data-idx="${idx}" data-talla="${t}" value="${av}">
+          <div>${pill}</div>
+          <input type="number" min="0" placeholder="+cant" class="inv-add-talla" id="add_${idx}_${t}">
+          <button class="btn btn-ghost btn-sm" onclick="addStockTalla(${idx},'${t}',this)" style="white-space:nowrap;">Entrada</button>`;
+      }).join('');
+      return `<div class="inv-row inv-row-tallas">
+        <div><b>${p.nombre}</b><br><span class="text-dim" style="font-size:11px;">${p.categoria} · EAN ${p.ean} · ${p.tipoTalla==='nino'?'Niño':'Adulto'}</span><br>${stockPill(p)}</div>
+        <div class="inv-talla-matrix">${encabezado}${filas}</div>
+      </div>`;
     } else {
-      existencias = `<input type="number" min="0" class="inv-stock-input" data-idx="${idx}" value="${parseInt(p.stock)||0}">`;
+      return `<div class="inv-row">
+        <div><b>${p.nombre}</b>${tallaLabel(p)?` <span class="psize">T-${tallaLabel(p)}</span>`:''}<br><span class="text-dim" style="font-size:11px;">${p.categoria} · EAN ${p.ean}</span></div>
+        <div><input type="number" min="0" class="inv-stock-input" data-idx="${idx}" value="${parseInt(p.stock)||0}"></div>
+        <div>${stockPill(p)}</div>
+        <div><input type="number" min="0" placeholder="+ cant." class="inv-stock-input inv-add-input" data-idx="${idx}"><button class="btn btn-ghost btn-sm" onclick="addStock(${idx}, this)">Entrada</button></div>
+      </div>`;
     }
-    return `<div class="inv-row">
-      <div><b>${p.nombre}</b>${tallaLabel(p)?` <span class="psize">T-${tallaLabel(p)}</span>`:''}<br><span class="text-dim" style="font-size:11px;">${p.categoria} · EAN ${p.ean}${p.usaTallas?' · por talla':''}</span></div>
-      <div>${existencias}</div>
-      <div>${stockPill(p)}</div>
-      <div><input type="number" min="0" placeholder="+ cant." class="inv-stock-input inv-add-input" data-idx="${idx}" ${p.usaTallas?'data-talla-add="1"':''}><button class="btn btn-ghost btn-sm" onclick="addStock(${idx}, this)">Entrada</button></div>
-    </div>`;
   }).join('');
 
   cont.querySelectorAll('.inv-stock-input:not(.inv-add-input)').forEach(inp=>{
@@ -2600,17 +2627,24 @@ function renderInvStock(){
   });
 }
 function addStock(idx, btn){
+  // Solo aplica a productos SIN tallas
   const p = PRODUCTS[idx];
   const input = btn.previousElementSibling;
   const add = parseInt(input.value)||0;
   if(add<=0){ toast('Indica una cantidad a ingresar'); return; }
-  if(p.usaTallas){
-    pickSizeForEntry(p, (talla)=>{ p.tallas[talla] = (parseInt(p.tallas[talla])||0)+add; input.value=''; saveState(); renderInvStock(); renderProductGrid(); toast(`+${add} und a talla ${talla}`); });
-  } else {
-    p.stock = (parseInt(p.stock)||0)+add;
-    input.value='';
-    saveState(); renderInvStock(); renderProductGrid(); toast(`+${add} unidades ingresadas`);
-  }
+  p.stock = (parseInt(p.stock)||0)+add;
+  input.value='';
+  saveState(); renderInvStock(); renderProductGrid(); toast(`+${add} unidades ingresadas`);
+}
+function addStockTalla(idx, talla, btn){
+  // Entrada directa por talla — sin contraseña ni modal
+  const p = PRODUCTS[idx];
+  const input = btn.previousElementSibling;
+  const add = parseInt(input.value)||0;
+  if(add<=0){ toast('Indica una cantidad a ingresar'); return; }
+  p.tallas[talla] = (parseInt(p.tallas[talla])||0)+add;
+  input.value='';
+  saveState(); renderInvStock(); renderProductGrid(); toast(`+${add} und · talla ${talla}`);
 }
 document.getElementById('invStockSearch').addEventListener('input', renderInvStock);
 
