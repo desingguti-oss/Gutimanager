@@ -231,18 +231,19 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
 
 /* INVENTORY */
 .inv-row{display:grid;grid-template-columns:1fr 130px 110px 120px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;}
-.inv-row.inv-row-tallas{grid-template-columns:200px 1fr;align-items:start;}
+.inv-row.inv-row-tallas{align-items:start;padding:10px 0;}
 .inv-row.head{font-weight:700;color:var(--text-dim);font-size:11px;text-transform:uppercase;}
 .inv-stock-input{width:70px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12.5px;text-align:center;}
 .inv-size-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
 .inv-size-cell{display:flex;align-items:center;gap:5px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:5px 8px;}
 .inv-size-cell label{font-size:11px;font-weight:700;color:var(--text-dim);}
 .inv-size-cell input{width:52px;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:5px;font-size:12px;text-align:center;}
-.inv-talla-matrix{display:grid;grid-template-columns:28px 68px 100px 70px 80px;gap:5px 8px;align-items:center;padding:4px 0;}
-.inv-talla-matrix .itm-hdr{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;text-align:center;}
-.inv-talla-matrix .itm-label{font-size:12px;font-weight:700;color:var(--text);text-align:center;}
-.inv-talla-matrix input.inv-talla-input{width:62px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:5px 6px;border-radius:6px;font-size:12px;text-align:center;}
-.inv-talla-matrix input.inv-add-talla{width:62px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:5px 6px;border-radius:6px;font-size:12px;text-align:center;}
+.inv-talla-col{display:flex;flex-direction:column;gap:5px;}
+.inv-talla-exist-row{display:flex;align-items:center;gap:5px;}
+.inv-talla-exist-row .t-label{font-size:11px;font-weight:700;color:var(--text-dim);width:20px;text-align:right;}
+.inv-talla-exist-row input.inv-talla-input{width:64px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;text-align:center;}
+.inv-talla-entrada-row{display:flex;align-items:center;gap:4px;}
+.inv-talla-entrada-row input.inv-add-talla{width:50px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 5px;border-radius:6px;font-size:11.5px;text-align:center;}
 .stock-pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;}
 .stock-ok{background:var(--green-soft);color:var(--green);}
 .stock-low{background:var(--yellow-soft);color:var(--yellow);}
@@ -2578,30 +2579,31 @@ function renderInvStock(){
   cont.innerHTML = list.map(p=>{
     const idx = PRODUCTS.indexOf(p);
     if(p.usaTallas){
-      // Fila especial: una mini-tabla con una línea por talla
       const tallas = getTallas(p);
-      const encabezado = `
-        <div class="itm-hdr">Talla</div>
-        <div class="itm-hdr">Existencias</div>
-        <div class="itm-hdr">Estado</div>
-        <div class="itm-hdr">+ Cantidad</div>
-        <div class="itm-hdr">Acción</div>`;
-      const filas = tallas.map(t=>{
-        const av = parseInt(p.tallas[t])||0;
-        let pill;
-        if(av<=0) pill=`<span class="stock-pill stock-out" style="font-size:10px;">Agotado</span>`;
-        else if(av<=(p.stockMin||3)) pill=`<span class="stock-pill stock-low" style="font-size:10px;">Bajo · ${av}</span>`;
-        else pill=`<span class="stock-pill stock-ok" style="font-size:10px;">${av} und</span>`;
-        return `
-          <div class="itm-label">${t}</div>
-          <input type="number" min="0" class="inv-talla-input" data-idx="${idx}" data-talla="${t}" value="${av}">
-          <div>${pill}</div>
-          <input type="number" min="0" placeholder="+cant" class="inv-add-talla" id="add_${idx}_${t}">
-          <button class="btn btn-ghost btn-sm" onclick="addStockTalla(${idx},'${t}',this)" style="white-space:nowrap;">Entrada</button>`;
-      }).join('');
+      // Columna existencias: talla label + input editable apilados
+      const colExist = `<div class="inv-talla-col">${tallas.map(t=>`
+        <div class="inv-talla-exist-row">
+          <span class="t-label">${t}</span>
+          <input type="number" min="0" class="inv-talla-input" data-idx="${idx}" data-talla="${t}" value="${parseInt(p.tallas[t])||0}">
+        </div>`).join('')}</div>`;
+      // Columna estado: pill por talla
+      const colEstado = `<div class="inv-talla-col">${tallas.map(t=>{
+        const av=parseInt(p.tallas[t])||0;
+        if(av<=0) return `<span class="stock-pill stock-out" style="font-size:10px;display:inline-block;">Agotado</span>`;
+        if(av<=(p.stockMin||3)) return `<span class="stock-pill stock-low" style="font-size:10px;display:inline-block;">Bajo·${av}</span>`;
+        return `<span class="stock-pill stock-ok" style="font-size:10px;display:inline-block;">${av} und</span>`;
+      }).join('')}</div>`;
+      // Columna entrada: input + botón por talla
+      const colEntrada = `<div class="inv-talla-col">${tallas.map(t=>`
+        <div class="inv-talla-entrada-row">
+          <input type="number" min="0" placeholder="+cant" class="inv-add-talla">
+          <button class="btn btn-ghost btn-sm" onclick="addStockTalla(${idx},'${t}',this)" style="padding:4px 8px;font-size:11px;">Entrada</button>
+        </div>`).join('')}</div>`;
       return `<div class="inv-row inv-row-tallas">
-        <div><b>${p.nombre}</b><br><span class="text-dim" style="font-size:11px;">${p.categoria} · EAN ${p.ean} · ${p.tipoTalla==='nino'?'Niño':'Adulto'}</span><br>${stockPill(p)}</div>
-        <div class="inv-talla-matrix">${encabezado}${filas}</div>
+        <div><b>${p.nombre}</b><br><span class="text-dim" style="font-size:11px;">${p.categoria} · EAN ${p.ean} · ${p.tipoTalla==='nino'?'Niño':'Adulto'}</span></div>
+        ${colExist}
+        ${colEstado}
+        ${colEntrada}
       </div>`;
     } else {
       return `<div class="inv-row">
