@@ -182,7 +182,7 @@ label.flabel{font-size:11.5px;color:var(--text-dim);font-weight:600;margin-botto
 .lock-screen .ic{font-size:42px;margin-bottom:14px;}
 .lock-screen input{max-width:260px;text-align:center;}
 .lock-screen .err{color:var(--red);font-size:12.5px;margin-top:6px;min-height:16px;}
-.admin-row{display:grid;grid-template-columns:64px 1.8fr 100px 84px 84px 46px 46px 46px 46px 34px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
+.admin-row{display:grid;grid-template-columns:64px 1.8fr 100px 84px 84px 46px 46px 46px 38px 46px 34px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
 .admin-row input[type=number],.admin-row input[type=text]{width:100%;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;}
 .admin-row.head{font-weight:700;color:var(--text-dim);font-size:10.5px;text-transform:uppercase;}
 .admin-row .del-prod{color:var(--red);cursor:pointer;font-weight:700;text-align:center;font-size:15px;}
@@ -588,7 +588,13 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
         <table><thead><tr><th>Métrica</th><th>Valor</th></tr></thead><tbody id="resumenBody"></tbody></table>
       </div>
       <div class="card mt16">
-        <div class="section-title">Historial de cierres <span class="hint" id="cierreHistCount"></span></div>
+        <div class="flex-between" style="margin-bottom:10px;">
+          <div class="section-title mb0">Historial de cierres <span class="hint" id="cierreHistCount"></span></div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input class="input" id="cierreHistFecha" type="date" oninput="renderReportes()" style="max-width:160px;padding:6px 10px;" title="Filtrar por fecha">
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cierreHistFecha').value='';renderReportes();" title="Limpiar filtro">✕</button>
+          </div>
+        </div>
         <div class="sticky-table-wrap scroll-thin" style="max-height:360px;">
           <table><thead><tr><th>Fecha</th><th>Facturas</th><th>Ventas</th><th>Gastos</th><th>Sueldo</th><th>Efectivo a guardar</th><th></th></tr></thead><tbody id="cierreHistBody"></tbody></table>
         </div>
@@ -752,10 +758,10 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
             <button class="btn btn-green btn-sm" id="btnAddProduct">+ Nuevo producto</button>
           </div>
           <input class="input mt8" id="adminSearch" placeholder="Buscar producto…" style="max-width:320px;">
-          <p class="text-dim" style="font-size:11.5px;margin:8px 0 0;">Agot. = agotado · Stock = controlar existencias · Tallas = manejar por talla · Cotizar = precio manual al vender (no usa Detal/Mayor)</p>
+          <p class="text-dim" style="font-size:11.5px;margin:8px 0 0;">Agot. = agotado · Stock = controlar existencias · Tallas = manejar por talla · Tipo = A adulto / N niño · Cotizar = precio manual al vender</p>
           <div class="sticky-table-wrap scroll-thin" style="max-height:520px;">
             <div class="admin-row head mt8">
-              <div>EAN</div><div>Nombre</div><div>Categoría</div><div>Detal</div><div>Mayor</div><div>Agot.</div><div>Stock</div><div>Tallas</div><div>Cotizar</div><div></div>
+              <div>EAN</div><div>Nombre</div><div>Categoría</div><div>Detal</div><div>Mayor</div><div>Agot.</div><div>Stock</div><div>Tallas</div><div>Tipo</div><div>Cotizar</div><div></div>
             </div>
             <div id="adminProductList"></div>
           </div>
@@ -999,7 +1005,8 @@ function buildSavePayload(){
   const overrides = {};
   PRODUCTS.forEach(p=>{ overrides[p.ean] = {detal:p.detal, mayor:p.mayor, agotado:p.agotado, cotizar:!!p.cotizar,
     nombre:p.nombre, categoria:p.categoria, talla:p.talla,
-    controlStock:p.controlStock, usaTallas:p.usaTallas, stock:p.stock, stockMin:p.stockMin, tallas:p.tallas}; });
+    controlStock:p.controlStock, usaTallas:p.usaTallas, tipoTalla:p.tipoTalla||'adulto',
+    stock:p.stock, stockMin:p.stockMin, tallas:p.tallas}; });
   const newEans = PRODUCTS.filter(p=>!BASE_EANS.has(p.ean)).map(p=>({...p}));
   const removedEans = [...BASE_EANS].filter(e=>!PRODUCTS.some(p=>p.ean===e));
   return { state, studio: STUDIO, logo: LOGO, adminPass: ADMIN_PASS, productOverrides: overrides, newProducts:newEans, removedEans };
@@ -1100,6 +1107,7 @@ function applyLoadedJson(raw, opts){
           if(o.talla!==undefined) p.talla=o.talla;
           if(o.controlStock!==undefined) p.controlStock=o.controlStock;
           if(o.usaTallas!==undefined) p.usaTallas=o.usaTallas;
+          if(o.tipoTalla!==undefined) p.tipoTalla=o.tipoTalla;
           if(o.stock!==undefined) p.stock=o.stock;
           if(o.stockMin!==undefined) p.stockMin=o.stockMin;
           if(o.tallas) p.tallas=o.tallas;
@@ -1337,7 +1345,9 @@ let invStockFilterCat = "TODAS";
 let invShowAgotados = false;
 let lastReportePeriodo = null;
 const DIGITAL_PAYS = ["Nequi","Daviplata","BRE-B","QR"];
-const TALLAS_DEFECTO = ["S","M","L","XL"];
+const TALLAS_ADULTO  = ["S","M","L","XL","XXL"];
+const TALLAS_NINO    = ["2","4","6","8","10","12","14","16"];
+const TALLAS_DEFECTO = TALLAS_ADULTO; // alias de compatibilidad
 
 /* ================= MODELO DE PRODUCTOS / STOCK ================= */
 function normalizeProduct(p){
@@ -1345,10 +1355,20 @@ function normalizeProduct(p){
   if(p.usaTallas===undefined) p.usaTallas = false;
   if(p.stock===undefined) p.stock = 0;
   if(p.stockMin===undefined) p.stockMin = 3;
+  if(p.tipoTalla===undefined) p.tipoTalla = 'adulto';
+  const tallasOrden = p.tipoTalla==='nino' ? TALLAS_NINO : TALLAS_ADULTO;
   if(!p.tallas || typeof p.tallas!=='object'){
     p.tallas = {};
-    TALLAS_DEFECTO.forEach(t=>p.tallas[t]=0);
+    tallasOrden.forEach(t=>p.tallas[t]=0);
+  } else {
+    // Asegura que existan todas las tallas del tipo actual
+    tallasOrden.forEach(t=>{ if(p.tallas[t]===undefined) p.tallas[t]=0; });
   }
+}
+function getTallas(p){
+  // Retorna las tallas en el orden correcto según el tipo del producto
+  const orden = p.tipoTalla==='nino' ? TALLAS_NINO : TALLAS_ADULTO;
+  return orden.filter(t=>p.tallas[t]!==undefined);
 }
 PRODUCTS.forEach(normalizeProduct);
 
@@ -1597,7 +1617,7 @@ function qtyInCart(ean, talla){
 }
 function pickSize(p, cb){
   document.getElementById('modalTitle').textContent = `Selecciona la talla — ${p.nombre}`;
-  const tallas = Object.keys(p.tallas);
+  const tallas = getTallas(p);
   document.getElementById('modalBody').innerHTML = `
     <p class="text-dim" style="font-size:12.5px;">Elige la talla a vender. Entre paréntesis las existencias disponibles.</p>
     <div class="size-pick-grid">
@@ -1610,6 +1630,24 @@ function pickSize(p, cb){
   document.getElementById('modalActions').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>`;
   document.getElementById('modalDetail').classList.add('show');
   document.querySelectorAll('#modalBody .size-pick:not(.disabled)').forEach(el=>{
+    el.addEventListener('click', ()=>{ closeModal(); cb(el.dataset.talla); });
+  });
+}
+function pickSizeForEntry(p, cb){
+  // Para entradas de mercancía: muestra TODAS las tallas del tipo del producto (incluso en cero)
+  document.getElementById('modalTitle').textContent = `¿A qué talla ingresas? — ${p.nombre}`;
+  const tallas = getTallas(p);
+  document.getElementById('modalBody').innerHTML = `
+    <p class="text-dim" style="font-size:12.5px;">Selecciona la talla para registrar la entrada. Puedes ingresar a cualquier talla.</p>
+    <div class="size-pick-grid">
+      ${tallas.map(t=>{
+        const av = parseInt(p.tallas[t])||0;
+        return `<div class="size-pick" data-talla="${t}">${t}<span class="stk">${av} und</span></div>`;
+      }).join('')}
+    </div>`;
+  document.getElementById('modalActions').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>`;
+  document.getElementById('modalDetail').classList.add('show');
+  document.querySelectorAll('#modalBody .size-pick').forEach(el=>{
     el.addEventListener('click', ()=>{ closeModal(); cb(el.dataset.talla); });
   });
 }
@@ -2535,7 +2573,7 @@ function renderInvStock(){
     const idx = PRODUCTS.indexOf(p);
     let existencias;
     if(p.usaTallas){
-      existencias = `<div class="inv-size-grid">${Object.keys(p.tallas).map(t=>`
+      existencias = `<div class="inv-size-grid">${getTallas(p).map(t=>`
         <div class="inv-size-cell"><label>${t}</label><input type="number" min="0" data-idx="${idx}" data-talla="${t}" class="inv-talla-input" value="${parseInt(p.tallas[t])||0}"></div>`).join('')}</div>`;
     } else {
       existencias = `<input type="number" min="0" class="inv-stock-input" data-idx="${idx}" value="${parseInt(p.stock)||0}">`;
@@ -2551,13 +2589,13 @@ function renderInvStock(){
   cont.querySelectorAll('.inv-stock-input:not(.inv-add-input)').forEach(inp=>{
     inp.addEventListener('change', e=>{
       const idx = parseInt(e.target.dataset.idx), val = Math.max(0, parseInt(e.target.value)||0);
-      requireStockPassword(()=>{ PRODUCTS[idx].stock = val; saveState(); renderInvStock(); renderProductGrid(); });
+      requireAnularPassword(()=>{ PRODUCTS[idx].stock = val; saveState(); renderInvStock(); renderProductGrid(); });
     });
   });
   cont.querySelectorAll('.inv-talla-input').forEach(inp=>{
     inp.addEventListener('change', e=>{
       const idx = parseInt(e.target.dataset.idx), talla = e.target.dataset.talla, val = Math.max(0, parseInt(e.target.value)||0);
-      requireStockPassword(()=>{ PRODUCTS[idx].tallas[talla] = val; saveState(); renderInvStock(); renderProductGrid(); });
+      requireAnularPassword(()=>{ PRODUCTS[idx].tallas[talla] = val; saveState(); renderInvStock(); renderProductGrid(); });
     });
   });
 }
@@ -2566,15 +2604,13 @@ function addStock(idx, btn){
   const input = btn.previousElementSibling;
   const add = parseInt(input.value)||0;
   if(add<=0){ toast('Indica una cantidad a ingresar'); return; }
-  requireStockPassword(()=>{
-    if(p.usaTallas){
-      // si maneja tallas, preguntar a cuál
-      pickSize(p, (talla)=>{ p.tallas[talla] = (parseInt(p.tallas[talla])||0)+add; saveState(); renderInvStock(); renderProductGrid(); toast(`+${add} und a talla ${talla}`); });
-    } else {
-      p.stock = (parseInt(p.stock)||0)+add;
-      saveState(); renderInvStock(); renderProductGrid(); toast(`+${add} unidades ingresadas`);
-    }
-  });
+  if(p.usaTallas){
+    pickSizeForEntry(p, (talla)=>{ p.tallas[talla] = (parseInt(p.tallas[talla])||0)+add; input.value=''; saveState(); renderInvStock(); renderProductGrid(); toast(`+${add} und a talla ${talla}`); });
+  } else {
+    p.stock = (parseInt(p.stock)||0)+add;
+    input.value='';
+    saveState(); renderInvStock(); renderProductGrid(); toast(`+${add} unidades ingresadas`);
+  }
 }
 document.getElementById('invStockSearch').addEventListener('input', renderInvStock);
 
@@ -2745,16 +2781,22 @@ function renderReportes(){
   renderHistorico();
 
   // Historial de cierres
-  document.getElementById('cierreHistCount').textContent = state.cashClosures.length + " cierres";
-  const closures = state.cashClosures.map((c,i)=>({c,i}));
-  document.getElementById('cierreHistBody').innerHTML = closures.length ? closures.slice().reverse().map(({c,i})=>`
+  const cierreHistFecha = document.getElementById('cierreHistFecha')?.value || '';
+  const allClosures = state.cashClosures.map((c,i)=>({c,i}));
+  const filteredClosures = cierreHistFecha
+    ? allClosures.filter(({c})=>new Date(c.date).toISOString().split('T')[0]===cierreHistFecha)
+    : allClosures;
+  document.getElementById('cierreHistCount').textContent =
+    (cierreHistFecha && filteredClosures.length!==allClosures.length
+      ? `${filteredClosures.length} de ` : '') + allClosures.length + " cierres";
+  document.getElementById('cierreHistBody').innerHTML = filteredClosures.length ? filteredClosures.slice().reverse().map(({c,i})=>`
     <tr><td>${new Date(c.date).toLocaleDateString('es-CO')}<br><span class="text-dim" style="font-size:11px;">${new Date(c.date).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</span></td>
     <td>${c.count}</td><td>${money(c.ventas||0)}</td>
     <td>${money(c.gastosTotal||0)}</td>
     <td>${money(c.sueldoMethod==='Efectivo'?(c.sueldo||0):0)}</td>
     <td><b>${money(c.efectivoGuardar||0)}</b></td>
     <td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="reprintCierre(${i})" title="Imprimir ticket">🖨️</button> <button class="btn btn-ghost btn-sm" onclick="printCierreLetter(${i})" title="Imprimir carta">📄</button> <button class="btn btn-ghost btn-sm" onclick="openEditCierre(${i})" title="Editar">✏️</button></td></tr>`).join('')
-    : `<tr><td colspan="8" class="text-dim">No se han realizado cierres</td></tr>`;
+    : `<tr><td colspan="8" class="text-dim">${cierreHistFecha ? 'No hay cierres para esa fecha' : 'No se han realizado cierres'}</td></tr>`;
 }
 
 function repDetPeriodKey(date, agrupar){
@@ -3326,6 +3368,7 @@ function renderAdminProducts(){
       <div class="toggle-sw adm-agotado ${p.agotado?'on':''}" title="Agotado"><div class="dot"></div></div>
       <div class="toggle-sw adm-stock ${p.controlStock?'on':''}" title="Controlar existencias"><div class="dot"></div></div>
       <div class="toggle-sw adm-tallas ${p.usaTallas?'on':''}" title="Manejar por talla"><div class="dot"></div></div>
+      <div><button class="btn adm-tipo-talla" style="padding:3px 7px;font-size:10px;font-weight:700;min-height:0;background:${p.tipoTalla==='nino'?'var(--blue)':'var(--panel-2)'};color:${p.tipoTalla==='nino'?'#fff':'var(--text-dim)'};border:1px solid var(--border);border-radius:6px;" title="${p.tipoTalla==='nino'?'Niño (clic para cambiar a Adulto)':'Adulto (clic para cambiar a Niño)'}">${p.tipoTalla==='nino'?'N':'A'}</button></div>
       <div class="toggle-sw adm-cotizar ${p.cotizar?'on':''}" title="Cotizar (precio manual al vender)"><div class="dot"></div></div>
       <div class="del-prod" title="Eliminar producto" onclick="deleteProduct(${idx})">🗑️</div>
     </div>`;
@@ -3347,6 +3390,12 @@ function renderAdminProducts(){
     row.querySelector('.adm-agotado').addEventListener('click', e=>{ p.agotado = !p.agotado; e.currentTarget.classList.toggle('on'); commitProductEdit(false); });
     row.querySelector('.adm-stock').addEventListener('click', e=>{ p.controlStock = !p.controlStock; e.currentTarget.classList.toggle('on'); commitProductEdit(true); });
     row.querySelector('.adm-tallas').addEventListener('click', e=>{ p.usaTallas = !p.usaTallas; normalizeProduct(p); e.currentTarget.classList.toggle('on'); commitProductEdit(true); });
+    row.querySelector('.adm-tipo-talla').addEventListener('click', ()=>{
+      p.tipoTalla = p.tipoTalla==='nino' ? 'adulto' : 'nino';
+      normalizeProduct(p);
+      commitProductEdit(true);
+      renderAdminProducts();
+    });
     row.querySelector('.adm-cotizar').addEventListener('click', e=>{ p.cotizar = !p.cotizar; e.currentTarget.classList.toggle('on'); commitProductEdit(false); });
   });
 }
