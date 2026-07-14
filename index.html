@@ -3551,7 +3551,17 @@ function confirmDeleteProduct(idx){
 }
 
 /* ================= CIERRE DE CAJA + REPORTES ================= */
-function lastCierreTime(){ return state.lastCierre ? new Date(state.lastCierre) : null; }
+function lastCierreTime(){
+  if(!state.lastCierre) return null;
+  const lcDate = new Date(state.lastCierre);
+  // Si lastCierre es de hoy pero NO hay cierre de hoy en el historial,
+  // significa que se cerró un día pasado (retroactivo) y no hoy.
+  // En ese caso ignoramos el filtro para mostrar todos los pagos de hoy.
+  if(isToday(lcDate) && !state.cashClosures.some(c=>c.dayKey===dayKeyOf(new Date()))){
+    return null;
+  }
+  return lcDate;
+}
 function openSalesToday(){
   const lc = lastCierreTime();
   return state.sales.filter(s=> s.status!=='Anulada' && isToday(s.date) && (!lc || new Date(s.date) > lc));
