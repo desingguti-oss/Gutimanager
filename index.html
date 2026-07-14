@@ -3674,7 +3674,8 @@ function doCloseCaja(overwrite){
   const snap = buildClosureSnapshot(overwrite);
   if(overwrite) state.cashClosures = state.cashClosures.filter(c=>c.dayKey!==snap.dayKey);
   state.cashClosures.push(snap);
-  state.lastCierre = new Date().toISOString();
+  // Solo actualizar lastCierre si estamos cerrando HOY, no un día pasado
+  if(!cierreDateOverride) state.lastCierre = new Date().toISOString();
   const isSnapDay = (d)=> cierreDateOverride ? new Date(cierreDateOverride).toDateString()===new Date(d).toDateString() : isToday(d);
   state.gastosDia = state.gastosDia.filter(g=>!isSnapDay(g.date));
   cierreDateOverride = null;
