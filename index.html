@@ -3598,7 +3598,7 @@ function renderCierre(){
     ? state.sales.filter(s=>s.status!=='Anulada' && isOverrideDay(s.date))
     : openSalesToday();
   const pays = cierreDateOverride
-    ? (()=>{ const ps=[]; sales.forEach(s=>{ (s.payments&&s.payments.length?s.payments:[{date:s.date,amount:s.total,method:s.pay}]).forEach(p=>{ if(isOverrideDay(p.date)) ps.push({...p,fromCartera:false}); }); }); return ps; })()
+    ? (()=>{ const ps=[]; state.sales.filter(s=>s.status!=='Anulada').forEach(s=>{ (s.payments&&s.payments.length?s.payments:[{date:s.date,amount:s.total,method:s.pay}]).forEach(p=>{ if(isOverrideDay(p.date)) ps.push({...p,fromCartera:!!p.fromCartera}); }); }); return ps; })()
     : openPaymentsToday(false);
   const byPay = {}; pays.forEach(p=>byPay[p.method]=(byPay[p.method]||0)+p.amount);
   const ingresoTotal = pays.reduce((a,p)=>a+p.amount,0);
