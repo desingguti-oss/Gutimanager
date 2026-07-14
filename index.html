@@ -2062,7 +2062,7 @@ function viewInvoice(id){
       <div class="cart-total-row"><span>Descuento ${s.discount.type==='pct'?('('+s.discount.value+'%)'):''}</span><span style="color:var(--red)">- ${money(s.discount.amount)}</span></div>`:''}
     <div class="cart-total-row grand mt8"><span>Total</span><span>${money(s.total)}</span></div>
     <p class="text-dim mt8">Forma de pago: ${s.pay} · Estado: ${s.status}</p>
-    ${(s.payments&&s.payments.length)?`<p class="text-dim mt8"><b>Pagos recibidos:</b><br>${s.payments.map(p=>`${p.date.toLocaleDateString('es-CO')} — ${money(p.amount)} (${p.method})`).join('<br>')}</p>`:''}
+    ${(s.payments&&s.payments.length)?`<div class="text-dim mt8"><b>Pagos recibidos:</b>${s.payments.map((p,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px;"><span>${p.date.toLocaleDateString('es-CO')} — <b>${money(p.amount)}</b> (${p.method})</span><button class="btn btn-ghost btn-sm" style="padding:1px 7px;font-size:11px;min-height:0;" onclick="editPago(${id},${i})">✏️ Editar</button></div>`).join('')}</div>`:''}
     ${saldo>0?`<p class="mt8"><b style="color:var(--yellow)">Saldo pendiente: ${money(saldo)}</b></p>`:''}
     ${s.notes?`<p class="text-dim mt8"><b>Observaciones:</b> ${s.notes}</p>`:''}
     ${hasDigitalPayment && !s.proof?`<div class="proof-upload" onclick="document.getElementById('invoiceProofInput').click()" style="margin-top:10px;">📎 Adjuntar comprobante de pago</div><input type="file" id="invoiceProofInput" accept="image/*" style="display:none;">`:``}
@@ -2403,12 +2403,16 @@ function renderCartera(){
 function openCobro(id){
   const s = state.sales.find(x=>x.id===id);
   const saldo = saleSaldo(s);
+  const hoy = new Date().toISOString().slice(0,10);
   document.getElementById('modalTitle').textContent = `Registrar pago — Factura #${s.id}`;
   document.getElementById('modalBody').innerHTML = `
     <p class="text-dim">${s.client} · Saldo pendiente: <b style="color:var(--yellow)">${money(saldo)}</b></p>
-    <label class="flabel mt8">Valor recibido</label>
+    <label class="flabel mt8">Fecha del pago</label>
+    <input class="input" id="cobroFecha" type="date" value="${hoy}" style="max-width:200px;">
+    <p class="text-dim" style="font-size:11px;margin:-6px 0 6px;">Cambia la fecha si el pago fue en un día diferente.</p>
+    <label class="flabel">Valor recibido</label>
     <input class="input" id="cobroValor" type="number" min="0" value="${saldo}">
-    <label class="flabel">¿Cómo pagó el saldo?</label>
+    <label class="flabel">¿Cómo pagó?</label>
     <select class="input" id="cobroMetodo">
       <option value="Efectivo">Efectivo</option>
       <option value="Nequi">Nequi</option>
@@ -2423,13 +2427,58 @@ function confirmCobro(id){
   const saldo = saleSaldo(s);
   let val = parseFloat(document.getElementById('cobroValor').value)||0;
   const method = document.getElementById('cobroMetodo').value;
+  const fechaVal = document.getElementById('cobroFecha')?.value;
+  const fecha = fechaVal ? new Date(fechaVal + 'T12:00:00') : new Date();
   if(val<=0){ toast('Ingresa un valor válido'); return; }
   if(val>saldo) val = saldo;
   s.payments = s.payments||[];
-  s.payments.push({date:new Date(), amount:val, method, fromCartera:true});
+  s.payments.push({date:fecha, amount:val, method, fromCartera:true});
   if(saleSaldo(s)<=0) s.status='Pagada';
   closeModal();
-  toast(`Pago de ${money(val)} registrado (${method})`);
+  saveState();
+  toast(`Pago de ${money(val)} registrado (${method}) · ${fecha.toLocaleDateString('es-CO')}`);
+  renderAll();
+}
+function editPago(saleId, payIdx){
+  requireAnularPassword(()=>{
+    const s = state.sales.find(x=>x.id===saleId);
+    if(!s||!s.payments||!s.payments[payIdx]){ toast('Pago no encontrado'); return; }
+    const p = s.payments[payIdx];
+    const d = p.date instanceof Date ? p.date : new Date(p.date);
+    const fechaActual = d.toISOString().slice(0,10);
+    document.getElementById('modalTitle').textContent = 'Editar pago';
+    document.getElementById('modalBody').innerHTML = `
+      <p class="text-dim">Factura #${saleId} · ${s.client}</p>
+      <label class="flabel mt8">Fecha del pago</label>
+      <input class="input" id="editPagoFecha" type="date" value="${fechaActual}" style="max-width:200px;">
+      <label class="flabel">Valor</label>
+      <input class="input" id="editPagoValor" type="number" min="0" value="${p.amount}">
+      <label class="flabel">Método de pago</label>
+      <select class="input" id="editPagoMetodo">
+        <option value="Efectivo" ${p.method==='Efectivo'?'selected':''}>Efectivo</option>
+        <option value="Nequi" ${p.method==='Nequi'?'selected':''}>Nequi</option>
+        <option value="Daviplata" ${p.method==='Daviplata'?'selected':''}>Daviplata</option>
+        <option value="Tarjeta" ${p.method==='Tarjeta'?'selected':''}>Tarjeta</option>
+      </select>`;
+    document.getElementById('modalActions').innerHTML = `
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmEditPago(${saleId},${payIdx})">Guardar cambios</button>`;
+    document.getElementById('modalDetail').classList.add('show');
+  });
+}
+function confirmEditPago(saleId, payIdx){
+  const s = state.sales.find(x=>x.id===saleId);
+  const fechaVal = document.getElementById('editPagoFecha').value;
+  const valor = parseFloat(document.getElementById('editPagoValor').value)||0;
+  const metodo = document.getElementById('editPagoMetodo').value;
+  if(!fechaVal||valor<=0){ toast('Verifica los datos'); return; }
+  s.payments[payIdx].date = new Date(fechaVal + 'T12:00:00');
+  s.payments[payIdx].amount = valor;
+  s.payments[payIdx].method = metodo;
+  s.status = saleSaldo(s)<=0 ? 'Pagada' : 'Abono';
+  closeModal();
+  saveState();
+  toast('Pago actualizado correctamente');
   renderAll();
 }
 function isToday(d, ref){ const t=ref?new Date(ref):new Date(); d=new Date(d); return d.getDate()===t.getDate()&&d.getMonth()===t.getMonth()&&d.getFullYear()===t.getFullYear(); }
