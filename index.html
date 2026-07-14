@@ -534,7 +534,10 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <section class="view" id="view-clientes">
       <div class="grid grid-3" id="clientesKpi"></div>
       <div class="card mt16">
-        <div class="section-title">Base de clientes <span class="hint" id="clientesCount"></span></div>
+        <div class="flex-between" style="margin-bottom:12px;gap:10px;flex-wrap:wrap;">
+          <div class="section-title mb0">Base de clientes <span class="hint" id="clientesCount"></span></div>
+          <input class="input" id="clienteSearch" placeholder="🔍 Buscar por nombre o teléfono…" style="max-width:280px;" oninput="renderClientes()">
+        </div>
         <table><thead><tr><th class="sort-th" onclick="sortClientes('nombre')" id="thCliNombre">Cliente ↕</th><th>Teléfono</th><th class="sort-th" onclick="sortClientes('compras')" id="thCliCompras">Compras ↕</th><th class="sort-th" onclick="sortClientes('total')" id="thCliTotal">Total comprado ↕</th><th>Producto favorito</th><th class="sort-th" onclick="sortClientes('segmento')" id="thCliSeg">Segmento ↕</th><th></th></tr></thead><tbody id="clientesBody"></tbody></table>
       </div>
     </section>
@@ -556,7 +559,10 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <section class="view" id="view-inventarios">
       <div class="grid grid-3" id="invStockKpi"></div>
       <div class="pos-filters mt16" id="invStockFilters"></div>
-      <input class="input" id="invStockSearch" placeholder="Buscar producto…" style="max-width:340px;">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;">
+        <input class="input" id="invStockSearch" placeholder="Buscar producto…" style="max-width:340px;flex:1;">
+        <button class="btn btn-ghost btn-sm" id="btnImprimirStockCarta">📊 Reporte de inventario (carta)</button>
+      </div>
       <div class="card mt16">
         <div class="section-title">Control de inventario <span class="hint" id="invStockCount"></span></div>
         <p class="text-dim" style="font-size:12px;margin:-6px 0 12px;">Activa el control de stock por producto en Administración. Las unidades se descuentan solas con cada venta.</p>
@@ -1071,7 +1077,24 @@ function applyLoadedJson(raw, opts){
         const merged = Object.assign({}, incoming);
         merged.sales = mergeArraysByKey(state.sales, incoming.sales, s=>s && s.id);
         merged.quotes = mergeArraysByKey(state.quotes, incoming.quotes, q=>q && q.id);
-        merged.cashClosures = mergeArraysByKey(state.cashClosures, incoming.cashClosures, c=>c && c.dayKey);
+        // Merge cashClosures con protección: un cierre ya cerrado (local)
+        // jamás puede ser reemplazado por una versión abierta que venga de la nube.
+        {
+          const localMap = new Map((Array.isArray(state.cashClosures)?state.cashClosures:[]).map(c=>[c.dayKey, c]));
+          const remoteMap = new Map((Array.isArray(incoming.cashClosures)?incoming.cashClosures:[]).map(c=>[c.dayKey, c]));
+          const allKeys = new Set([...localMap.keys(), ...remoteMap.keys()]);
+          merged.cashClosures = Array.from(allKeys).map(dk=>{
+            const local = localMap.get(dk);
+            const remote = remoteMap.get(dk);
+            // Si el local está cerrado (_ventasMigrated), siempre gana
+            if(local && local._ventasMigrated) return local;
+            // Si solo existe remoto (o solo local sin cerrar), usar el que exista
+            if(!local) return remote;
+            if(!remote) return local;
+            // Si ninguno está cerrado, el remoto gana (sync normal)
+            return remote;
+          });
+        }
         merged.clients = mergeClients(state.clients, incoming.clients);
         merged.invoiceSeq = Math.max(Number(state.invoiceSeq)||1000, Number(incoming.invoiceSeq)||1000);
         merged.quoteSeq = Math.max(Number(state.quoteSeq)||500, Number(incoming.quoteSeq)||500);
@@ -1195,19 +1218,27 @@ function applyRemoteRow(row){
 async function pollCloudChanges(){
   if(!sbUser || applyingRemote || !cloudSeeded) return;
   try {
-    const { data: row, error } = await sbClient
+    // PASO 1: Solo consultar metadatos (client_id + updated_at) — mínimo egress
+    const { data: meta, error: metaErr } = await sbClient
+      .from('studio_data')
+      .select('client_id, updated_at')
+      .eq('user_id', sbUser.id)
+      .maybeSingle();
+    if(metaErr) throw metaErr;
+    pollFailCount = 0;
+    if(!meta) return;
+    // Si es de este mismo dispositivo o no cambió, nada que hacer
+    if(meta.client_id === CLIENT_ID){ lastKnownCloudUpdatedAt = meta.updated_at; return; }
+    if(lastKnownCloudUpdatedAt && meta.updated_at === lastKnownCloudUpdatedAt) return;
+    // PASO 2: Solo ahora (otro dispositivo cambió algo) descargamos el JSON completo
+    const { data: row, error: rowErr } = await sbClient
       .from('studio_data')
       .select('data, client_id, updated_at')
       .eq('user_id', sbUser.id)
       .maybeSingle();
-    if(error) throw error;
-    pollFailCount = 0; // conexión exitosa → resetear contador
-    if(!row || !row.data) return;
-    if(row.client_id === CLIENT_ID){ lastKnownCloudUpdatedAt = row.updated_at; return; }
-    if(lastKnownCloudUpdatedAt && row.updated_at === lastKnownCloudUpdatedAt) return; // ya aplicamos exactamente esta versión
-    // Hay datos más nuevos de otro dispositivo → aplicar
-    applyRemoteRow(row);
-    setSyncStatus(true); // restaurar indicador si estaba en error
+    if(rowErr) throw rowErr;
+    if(row && row.data) applyRemoteRow(row);
+    setSyncStatus(true);
   } catch(e){
     pollFailCount++;
     setSyncStatus(false, "Sin conexión a la nube (guardado local)");
@@ -1215,7 +1246,7 @@ async function pollCloudChanges(){
 }
 function startPolling(){
   if(pollTimer) return;
-  pollTimer = setInterval(pollCloudChanges, 3000); // cada 3 segundos
+  pollTimer = setInterval(pollCloudChanges, 30000); // cada 30 segundos (reduce egress ~10x)
 }
 async function startCloudSync(){
   if(sbChannel) return;
@@ -1276,8 +1307,10 @@ async function startCloudSync(){
         setSyncStatus(false, "Sin conexión a la nube (usando datos locales)");
     });
 
-  // 3. Polling de respaldo: cada 30 s verifica si hay cambios aunque el realtime falle
-  startPolling();
+  // El WebSocket Realtime ya maneja la sincronización en tiempo real.
+  // El polling HTTP fue eliminado porque generaba egress excesivo (10+ GB/mes).
+  // Si el canal Realtime se cae, el usuario verá el indicador de sin conexión
+  // y los datos quedan guardados localmente hasta que la conexión se restaure.
 }
 sbClient.auth.onAuthStateChange(async (event, session) => {
   const user = session ? session.user : null;
@@ -2244,10 +2277,16 @@ function sortClientes(col){
 }
 function renderClientes(){
   const body = document.getElementById('clientesBody');
-  document.getElementById('clientesCount').textContent = state.clients.length + " clientes";
+  const q = (document.getElementById('clienteSearch')?.value||'').toLowerCase().trim();
+  const base = q ? state.clients.filter(c=>
+    (c.name||'').toLowerCase().includes(q) || (c.phone||'').toLowerCase().includes(q)
+  ) : state.clients;
+  document.getElementById('clientesCount').textContent = q
+    ? `${base.length} de ${state.clients.length} clientes`
+    : `${state.clients.length} clientes`;
   const {col,asc} = clientesSort;
   const segOrder = {VIP:0,Frecuente:1,Regular:2,Nuevo:3};
-  const sorted = state.clients.slice().sort((a,b)=>{
+  const sorted = base.slice().sort((a,b)=>{
     let va, vb;
     if(col==='nombre'){ va=a.name.toLowerCase(); vb=b.name.toLowerCase(); }
     else if(col==='compras'){ va=a.purchases.length; vb=b.purchases.length; }
@@ -2257,8 +2296,11 @@ function renderClientes(){
     if(typeof va==='string') return asc?va.localeCompare(vb):vb.localeCompare(va);
     return asc?va-vb:vb-va;
   });
-  if(sorted.length===0){ body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="ic">👥</div>Aún no hay clientes registrados</div></td></tr>`; }
-  else {
+  if(sorted.length===0){
+    body.innerHTML = q
+      ? `<tr><td colspan="7"><div class="empty-state"><div class="ic">🔍</div>Sin resultados para "<b>${q}</b>"</div></td></tr>`
+      : `<tr><td colspan="7"><div class="empty-state"><div class="ic">👥</div>Aún no hay clientes registrados</div></td></tr>`;
+  } else {
     body.innerHTML = sorted.map(c=>{
       const seg = clientSegment(c);
       return `<tr>
@@ -2272,10 +2314,10 @@ function renderClientes(){
       </tr>`;
     }).join('');
   }
-  const vip = sorted.filter(c=>clientSegment(c).label==='VIP').length;
-  const freq = sorted.filter(c=>clientSegment(c).label==='Frecuente').length;
-  const avg = sorted.length ? sorted.reduce((a,c)=>a+c.totalSpent,0)/sorted.length : 0;
-  document.getElementById('clientesKpi').innerHTML = kpiCard("👥","bg-violet","Total clientes", sorted.length,"") +
+  const allClients = state.clients;
+  const vip = allClients.filter(c=>clientSegment(c).label==='VIP').length;
+  const freq = allClients.filter(c=>clientSegment(c).label==='Frecuente').length;
+  document.getElementById('clientesKpi').innerHTML = kpiCard("👥","bg-violet","Total clientes", allClients.length,"") +
     kpiCard("⭐","bg-yellow","Clientes VIP", vip,"") +
     kpiCard("🔁","bg-green","Frecuentes", freq,"");
 }
@@ -4127,6 +4169,94 @@ function printInventarioDisponibleLetter(){
     </div>`;
   setTimeout(()=>{ window.print(); area.classList.remove('print-letter'); }, 50);
 }
+
+/* ================= REPORTE DE INVENTARIO (CARTA) ================= */
+function printInventarioStockLetter(){
+  const conStock = PRODUCTS.filter(p=>p.controlStock);
+  if(conStock.length===0){ toast('No hay productos con control de stock activado'); return; }
+  let totalValor = 0;
+  const filas = conStock.map(p=>{
+    if(p.usaTallas){
+      const tallas = getTallas(p);
+      const stockTotal = tallas.reduce((s,t)=>(s+(parseInt(p.tallas[t])||0)),0);
+      const valor = stockTotal * (parseFloat(p.detal)||0);
+      totalValor += valor;
+      const tallaRows = tallas.map(t=>{
+        const cant = parseInt(p.tallas[t])||0;
+        const est = cant<=0?'Agotado':cant<=(parseInt(p.stockMin)||3)?'Bajo':'OK';
+        const col = cant<=0?'#e53935':cant<=(parseInt(p.stockMin)||3)?'#f97316':'#22c55e';
+        return `<tr style="font-size:11px;">
+          <td style="padding:3px 7px;color:#888;padding-left:20px;">${p.ean}</td>
+          <td style="padding:3px 7px;padding-left:20px;">└ Talla <b>${t}</b></td>
+          <td style="padding:3px 7px;text-align:center;">${cant}</td>
+          <td style="padding:3px 7px;text-align:center;"><span style="background:${col};color:#fff;border-radius:4px;padding:1px 6px;font-size:10px;">${est}</span></td>
+          <td style="padding:3px 7px;text-align:right;">${money(p.detal)}</td>
+          <td style="padding:3px 7px;text-align:right;">${money(cant*(parseFloat(p.detal)||0))}</td>
+        </tr>`;
+      }).join('');
+      return `<tr style="border-top:2px solid #eee;">
+        <td style="padding:6px 7px;font-weight:700;">${p.ean}</td>
+        <td style="padding:6px 7px;font-weight:700;">${p.nombre} <span style="font-size:10px;color:#888;font-weight:400;">(${p.tipoTalla==='nino'?'Niño':'Adulto'})</span></td>
+        <td style="padding:6px 7px;text-align:center;font-weight:700;">${stockTotal}</td>
+        <td style="padding:6px 7px;"></td>
+        <td style="padding:6px 7px;text-align:right;">${money(p.detal)}</td>
+        <td style="padding:6px 7px;text-align:right;font-weight:700;">${money(valor)}</td>
+      </tr>${tallaRows}`;
+    } else {
+      const cant = parseInt(p.stock)||0;
+      const valor = cant * (parseFloat(p.detal)||0);
+      totalValor += valor;
+      const est = cant<=0?'Agotado':cant<=(parseInt(p.stockMin)||3)?'Bajo':'OK';
+      const col = cant<=0?'#e53935':cant<=(parseInt(p.stockMin)||3)?'#f97316':'#22c55e';
+      return `<tr>
+        <td style="padding:6px 7px;border-bottom:1px solid #eee;">${p.ean}</td>
+        <td style="padding:6px 7px;border-bottom:1px solid #eee;">${p.nombre}</td>
+        <td style="padding:6px 7px;border-bottom:1px solid #eee;text-align:center;font-weight:700;">${cant}</td>
+        <td style="padding:6px 7px;border-bottom:1px solid #eee;text-align:center;"><span style="background:${col};color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;">${est}</span></td>
+        <td style="padding:6px 7px;border-bottom:1px solid #eee;text-align:right;">${money(p.detal)}</td>
+        <td style="padding:6px 7px;border-bottom:1px solid #eee;text-align:right;">${money(valor)}</td>
+      </tr>`;
+    }
+  }).join('');
+  const area = document.getElementById('printArea');
+  area.classList.add('print-letter');
+  area.innerHTML = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;color:#000;">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #7c5cff;padding-bottom:14px;margin-bottom:18px;">
+        <div style="display:flex;gap:14px;align-items:center;">
+          ${LOGO?`<img src="${LOGO}" style="max-width:60px;max-height:60px;object-fit:contain;">`:''}
+          <div>
+            <div style="font-size:18px;font-weight:700;">${STUDIO.name}</div>
+            <div style="font-size:11.5px;color:#555;">${STUDIO.nit}<br>${STUDIO.addr}</div>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:18px;font-weight:700;color:#7c5cff;">REPORTE DE INVENTARIO</div>
+          <div style="font-size:12px;color:#555;">Generado: ${new Date().toLocaleString('es-CO')}</div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+        <thead><tr style="background:#f1f1f4;">
+          <th style="text-align:left;padding:7px;border-bottom:2px solid #ddd;">EAN</th>
+          <th style="text-align:left;padding:7px;border-bottom:2px solid #ddd;">Producto</th>
+          <th style="text-align:center;padding:7px;border-bottom:2px solid #ddd;">Existencias</th>
+          <th style="text-align:center;padding:7px;border-bottom:2px solid #ddd;">Estado</th>
+          <th style="text-align:right;padding:7px;border-bottom:2px solid #ddd;">Precio</th>
+          <th style="text-align:right;padding:7px;border-bottom:2px solid #ddd;">Valor en inventario</th>
+        </tr></thead>
+        <tbody>${filas}</tbody>
+        <tfoot>
+          <tr style="background:#7c5cff;color:#fff;">
+            <td colspan="5" style="padding:10px 7px;font-size:14px;font-weight:700;">VALOR TOTAL ESTIMADO DEL INVENTARIO</td>
+            <td style="padding:10px 7px;text-align:right;font-size:16px;font-weight:700;">${money(totalValor)}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div style="margin-top:14px;font-size:12px;color:#555;">Productos con control de stock: <b>${conStock.length}</b></div>
+    </div>`;
+  setTimeout(()=>{ window.print(); area.classList.remove('print-letter'); }, 50);
+}
+document.getElementById('btnImprimirStockCarta')?.addEventListener('click', printInventarioStockLetter);
 
 /* ================= FACTURA TAMAÑO CARTA (PROFESIONAL) ================= */
 function printInvoiceLetter(id){
