@@ -6,7 +6,9 @@
 <title>Studio Manager — Sistema de Gestión</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <style>
 :root{
   --bg:#0f1115; --bg-soft:#161922; --panel:#1b1f29; --panel-2:#21262f;
@@ -845,24 +847,31 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
 <script>
 /* ================= FIREBASE (sincronización en la nube) ================= */
 /* ── SUPABASE ──────────────────────────────────────────────────────────────
-   Reemplaza Firebase por completo. La clave "anon" es pública (solo permite
-   acceder a filas del propio usuario autenticado gracias a Row Level Security).
-   La clave "service_role" NUNCA va aquí — esa es privada y va en servidores.
+   Firebase Realtime Database — reemplaza Supabase por completo.
+   Sin egress medido, sincronización WebSocket nativa, gratuito hasta 10 GB/mes.
+   La apiKey es pública; la seguridad real la dan las Firebase Security Rules.
    ─────────────────────────────────────────────────────────────────────────── */
-const SUPABASE_URL  = "https://cvnrqtxmjxfhenivyglb.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2bnJxdHhtanhmaGVuaXZ5Z2xiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4MTM0MDAsImV4cCI6MjA5ODM4OTQwMH0.o9toFD1IAFJ8w4DdEbVM3Ux-iy6-b9TEC_589YO88vU";
-const sbClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const firebaseConfig = {
+  apiKey: "AIzaSyCfaRX0u1dRQWArnp28DXsT5atBoUxAokM",
+  authDomain: "guti-manager.firebaseapp.com",
+  databaseURL: "https://guti-manager-default-rtdb.firebaseio.com",
+  projectId: "guti-manager",
+  storageBucket: "guti-manager.firebasestorage.app",
+  messagingSenderId: "837910488564",
+  appId: "1:837910488564:web:8321ef224785fa287945a1"
+};
+firebase.initializeApp(firebaseConfig);
+const fbAuth = firebase.auth();
+const fbDb   = firebase.database();
 const AUTHORIZED_EMAIL = "desing.guti@gmail.com";
 const CLIENT_ID = Math.random().toString(36).slice(2) + "_" + Date.now().toString(36);
-let sbUser = null;
-let sbChannel = null;
+let fbUser = null;
+let fbRef  = null;  // referencia activa de Realtime DB con listener
 let applyingRemote = false;
 let cloudSeeded = false;
 let pendingCloudJson = null;
 let pendingCloudTimer = null;
 let lastKnownCloudUpdatedAt = null;  // timestamp del último dato que conocemos de la nube
-let pollTimer = null;
-let pollFailCount = 0;  // fallos consecutivos del polling
 /* Bloquea cualquier intento de subir datos a la nube hasta que este dispositivo
    haya revisado primero qué hay realmente guardado ahí. Esto evita que un
    dispositivo con datos locales viejos o incompletos sobrescriba, al abrirse,
@@ -874,9 +883,8 @@ let initialSyncPending = true;
    de "qué hay en la nube primero" lo sobrescriba de inmediato. */
 const FORCE_PUSH_KEY = "studio_force_push_once";
 
-/* Con Supabase no se necesita dividir en pedazos: la columna JSONB de
-   Postgres aguanta datos muy grandes sin ningún límite práctico para
-   este uso. Los datos viajan en una sola llamada. */
+/* Firebase Realtime Database guarda el JSON completo en un solo nodo.
+   No hay límite práctico para el tamaño de este estado (~100 KB máx.). */
 
 /* ── FONT SCALE ── */
 let fontScale = parseInt(localStorage.getItem('studioFontScale')||'0');
@@ -901,58 +909,38 @@ let cierreDateOverride = null;
 async function manualSave(){
   const btn = document.getElementById('saveBtnTop');
   const lbl = document.getElementById('saveBtnLabel');
-  if(!btn || !sbUser) return;
+  if(!btn || !fbUser) return;
   btn.classList.remove('saved');
   btn.classList.add('saving');
   lbl.textContent = 'Sincronizando…';
   try {
-    // ── PASO 1: PUSH ──────────────────────────────────────────────────────
-    // Subir el estado LOCAL actual primero, ANTES de tocar nada de la nube.
-    // Si se baja primero se pisan cambios recientes (cierre de caja, facturas)
-    // que todavía no habían llegado a la nube.
+    // ── PASO 1: PULL ─────────────────────────────────────────────────────
+    // Ver si el otro PC cambió algo entre medio para mezclarlo primero.
     clearTimeout(pendingCloudTimer);
     pendingCloudTimer = null;
     pendingCloudJson = null;
-    const localJson = JSON.stringify(buildSavePayload());
-    localStorage.setItem(SAVE_KEY, localJson);
-    const { data: pushed, error: pushErr } = await sbClient.from('studio_data').upsert({
-      user_id: sbUser.id,
-      data: JSON.parse(localJson),
-      updated_at: new Date().toISOString(),
-      client_id: CLIENT_ID
-    }, { onConflict: 'user_id' }).select('updated_at').maybeSingle();
-    if(pushErr) throw pushErr;
-    lastKnownCloudUpdatedAt = (pushed && pushed.updated_at) || new Date().toISOString();
-
-    // ── PASO 2: PULL ──────────────────────────────────────────────────────
-    // Ahora que la nube ya tiene nuestros datos, bajamos para ver si el OTRO
-    // PC guardó algo justo en este instante. Si client_id es el nuestro,
-    // la nube ya tiene lo que subimos → nada que mezclar.
-    const { data: row } = await sbClient
-      .from('studio_data')
-      .select('data, client_id, updated_at')
-      .eq('user_id', sbUser.id)
-      .maybeSingle();
-    if(row && row.data && row.client_id !== CLIENT_ID){
-      // Otro dispositivo actualizó justo entre nuestro push y este pull → mezclar
+    const ref = fbDb.ref('studio_data/' + fbUser.uid);
+    const snap = await ref.once('value');
+    const remote = snap.val();
+    if(remote && remote.data && remote.client_id !== CLIENT_ID){
       applyingRemote = true;
-      applyLoadedJson(JSON.stringify(row.data), {merge: true});
+      applyLoadedJson(JSON.stringify(remote.data), {merge: true});
       applyBrandToUI();
       renderAll();
       syncInvoiceNumField && syncInvoiceNumField();
       syncSaleDateField && syncSaleDateField();
       applyingRemote = false;
-      // Subir el resultado mezclado
-      const mergedJson = JSON.stringify(buildSavePayload());
-      localStorage.setItem(SAVE_KEY, mergedJson);
-      const { data: saved2 } = await sbClient.from('studio_data').upsert({
-        user_id: sbUser.id,
-        data: JSON.parse(mergedJson),
-        updated_at: new Date().toISOString(),
-        client_id: CLIENT_ID
-      }, { onConflict: 'user_id' }).select('updated_at').maybeSingle();
-      lastKnownCloudUpdatedAt = (saved2 && saved2.updated_at) || new Date().toISOString();
     }
+
+    // ── PASO 2: PUSH ─────────────────────────────────────────────────────
+    const mergedJson = JSON.stringify(buildSavePayload());
+    localStorage.setItem(SAVE_KEY, mergedJson);
+    await ref.set({
+      data: JSON.parse(mergedJson),
+      updated_at: new Date().toISOString(),
+      client_id: CLIENT_ID
+    });
+    lastKnownCloudUpdatedAt = new Date().toISOString();
 
     setSyncStatus(true);
     btn.classList.remove('saving');
@@ -989,30 +977,32 @@ async function doLogin(){
   document.getElementById('loginStatus').textContent = "Verificando...";
   btn.disabled = true;
   try {
-    const { error } = await sbClient.auth.signInWithPassword({ email, password: pass });
-    if(error){
-      // Primera vez: el usuario todavía no existe en Supabase → lo creamos
-      if(error.message && error.message.toLowerCase().includes('invalid login credentials')){
-        const { error: signUpErr } = await sbClient.auth.signUp({ email, password: pass });
-        if(signUpErr) throw signUpErr;
-        // signUp exitoso dispara onAuthStateChange automáticamente
-        document.getElementById('loginStatus').textContent = "";
-        return;
+    try {
+      await fbAuth.signInWithEmailAndPassword(email, pass);
+    } catch(signInErr){
+      // Primera vez: el usuario aún no existe en Firebase → lo creamos
+      if(signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential'){
+        await fbAuth.createUserWithEmailAndPassword(email, pass);
+        // createUser exitoso dispara onAuthStateChanged automáticamente
+      } else {
+        throw signInErr;
       }
-      throw error;
     }
+    document.getElementById('loginStatus').textContent = "";
   } catch(err){
     document.getElementById('loginStatus').textContent = "";
     let msg = "No se pudo iniciar sesión. Verifica tu correo y contraseña.";
-    if(err.message && err.message.includes('Email not confirmed')) msg = "Debes confirmar tu correo antes de entrar. Revisa tu bandeja de entrada.";
+    if(err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = "Correo o contraseña incorrectos.";
+    else if(err.code === 'auth/too-many-requests') msg = "Demasiados intentos fallidos. Espera un momento e intenta de nuevo.";
+    else if(err.code === 'auth/email-already-in-use') msg = "Ya existe una cuenta con ese correo.";
     document.getElementById('loginError').textContent = msg;
   } finally {
     btn.disabled = false;
   }
 }
 async function doLogout(){
-  if(sbChannel){ await sbClient.removeChannel(sbChannel); sbChannel = null; }
-  await sbClient.auth.signOut();
+  if(fbRef){ fbRef.off(); fbRef = null; }
+  await fbAuth.signOut();
 }
 function buildSavePayload(){
   const overrides = {};
@@ -1148,41 +1138,24 @@ function applyLoadedJson(raw, opts){
   }catch(e){ console.warn("No se pudo aplicar lo cargado:", e); }
 }
 async function doCloudPush(){
-  if(!sbUser || applyingRemote || pendingCloudJson===null) return;
+  if(!fbUser || applyingRemote || pendingCloudJson===null) return;
   const toSend = pendingCloudJson;
   pendingCloudJson = null;
   try {
-    // Un solo upsert atómico: si ya existe la fila del usuario la actualiza,
-    // si no existe la crea. No hay "pedazos" ni dos pasos: todo o nada.
-    const { data: saved, error } = await sbClient.from('studio_data').upsert({
-      user_id: sbUser.id,
+    // Firebase Realtime Database: set() reemplaza el nodo completo atómicamente.
+    await fbDb.ref('studio_data/' + fbUser.uid).set({
       data: JSON.parse(toSend),
       updated_at: new Date().toISOString(),
       client_id: CLIENT_ID
-    }, { onConflict: 'user_id' }).select('updated_at').maybeSingle();
-    if(error) throw error;
-    // Usar el updated_at real que guardó la BD (no el reloj del cliente)
-    lastKnownCloudUpdatedAt = (saved && saved.updated_at) || new Date().toISOString();
+    });
+    lastKnownCloudUpdatedAt = new Date().toISOString();
     setSyncStatus(true);
-    // Guardar copia diaria inmutable (solo la primera del día se conserva)
-    saveDailySnapshot(toSend).catch(()=>{});
   } catch(err){
     pendingCloudJson = toSend; // devolver para reintentar
-    console.warn("Error guardando en Supabase:", err);
+    console.warn("Error guardando en Firebase:", err);
     setSyncStatus(false, "Sin conexión a la nube (guardado local)");
     toast('No se pudo subir el último cambio a la nube. Sigue guardado en este computador.');
   }
-}
-async function saveDailySnapshot(jsonStr){
-  if(!sbUser) return;
-  const dayKey = new Date().toISOString().slice(0,10);
-  // ignoreDuplicates: la primera copia del día queda fija, las del mismo día
-  // no la sobrescriben. Así siempre tienes el estado inicial de cada día.
-  await sbClient.from('studio_snapshots').upsert({
-    user_id: sbUser.id,
-    day_key: dayKey,
-    data: JSON.parse(jsonStr)
-  }, { onConflict: 'user_id,day_key', ignoreDuplicates: true });
 }
 function pushStateToCloud(json){
   if(initialSyncPending) return; // todavía no sabemos qué hay en la nube: no subimos nada
@@ -1200,10 +1173,12 @@ function flushPendingCloudSave(){
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') flushPendingCloudSave(); });
 window.addEventListener('pagehide', flushPendingCloudSave);
 window.addEventListener('beforeunload', flushPendingCloudSave);
-function applyRemoteRow(row){
+function applyRemoteRow(val){
+  // val = { data, updated_at, client_id } — estructura guardada en Firebase
+  if(!val || !val.data) return;
   // Combina siempre con lo local para no perder registros de este dispositivo
-  const jsonStr = JSON.stringify(row.data);
-  if(row.updated_at) lastKnownCloudUpdatedAt = row.updated_at;
+  const jsonStr = JSON.stringify(val.data);
+  if(val.updated_at) lastKnownCloudUpdatedAt = val.updated_at;
   applyingRemote = true;
   applyLoadedJson(jsonStr, {merge: true});
   applyBrandToUI();
@@ -1215,107 +1190,69 @@ function applyRemoteRow(row){
   // Si la combinación añadió registros que la nube no tenía, subimos el resultado
   saveState();
 }
-async function pollCloudChanges(){
-  if(!sbUser || applyingRemote || !cloudSeeded) return;
-  try {
-    // PASO 1: Solo consultar metadatos (client_id + updated_at) — mínimo egress
-    const { data: meta, error: metaErr } = await sbClient
-      .from('studio_data')
-      .select('client_id, updated_at')
-      .eq('user_id', sbUser.id)
-      .maybeSingle();
-    if(metaErr) throw metaErr;
-    pollFailCount = 0;
-    if(!meta) return;
-    // Si es de este mismo dispositivo o no cambió, nada que hacer
-    if(meta.client_id === CLIENT_ID){ lastKnownCloudUpdatedAt = meta.updated_at; return; }
-    if(lastKnownCloudUpdatedAt && meta.updated_at === lastKnownCloudUpdatedAt) return;
-    // PASO 2: Solo ahora (otro dispositivo cambió algo) descargamos el JSON completo
-    const { data: row, error: rowErr } = await sbClient
-      .from('studio_data')
-      .select('data, client_id, updated_at')
-      .eq('user_id', sbUser.id)
-      .maybeSingle();
-    if(rowErr) throw rowErr;
-    if(row && row.data) applyRemoteRow(row);
-    setSyncStatus(true);
-  } catch(e){
-    pollFailCount++;
-    setSyncStatus(false, "Sin conexión a la nube (guardado local)");
-  }
-}
-function startPolling(){
-  if(pollTimer) return;
-  pollTimer = setInterval(pollCloudChanges, 30000); // cada 30 segundos (reduce egress ~10x)
-}
-async function startCloudSync(){
-  if(sbChannel) return;
-  try {
-    // 1. Leer el estado actual de la nube una sola vez al arrancar
-    const { data: row, error } = await sbClient
-      .from('studio_data')
-      .select('data, client_id, updated_at')
-      .eq('user_id', sbUser.id)
-      .maybeSingle();
-    if(error) throw error;
-    if(!row){
-      // Nube vacía: este dispositivo tiene los datos buenos → los sube
-      cloudSeeded = true;
-      initialSyncPending = false;
-      const hasLocalData = (state.sales && state.sales.length) ||
-        (state.clients && state.clients.length) ||
-        (state.quotes && state.quotes.length) ||
-        (state.cashClosures && state.cashClosures.length);
-      if(hasLocalData) saveState();
-      setSyncStatus(true, "Nube lista");
-    } else if(row.client_id === CLIENT_ID){
-      // La nube ya tiene exactamente lo que este dispositivo subió → sin cambios
-      if(row.updated_at) lastKnownCloudUpdatedAt = row.updated_at;
-      cloudSeeded = true;
-      initialSyncPending = false;
-      setSyncStatus(true);
+function startCloudSync(){
+  if(fbRef) return;
+  const ref = fbDb.ref('studio_data/' + fbUser.uid);
+  fbRef = ref;
+  let firstFire = true;
+
+  // ref.on('value') dispara inmediatamente con el valor actual y luego en
+  // cada cambio. Usamos 'firstFire' para separar la carga inicial del
+  // streaming en tiempo real posterior.
+  ref.on('value', snap => {
+    const val = snap.val();
+
+    if(firstFire){
+      firstFire = false;
+      if(!val){
+        // Nube vacía: este dispositivo tiene los datos buenos → los sube
+        cloudSeeded = true;
+        initialSyncPending = false;
+        const hasLocalData = (state.sales && state.sales.length) ||
+          (state.clients && state.clients.length) ||
+          (state.quotes && state.quotes.length) ||
+          (state.cashClosures && state.cashClosures.length);
+        if(hasLocalData) saveState();
+        setSyncStatus(true, "Nube lista");
+      } else if(val.client_id === CLIENT_ID){
+        // La nube tiene exactamente lo que este dispositivo subió → sin cambios
+        if(val.updated_at) lastKnownCloudUpdatedAt = val.updated_at;
+        cloudSeeded = true;
+        initialSyncPending = false;
+        setSyncStatus(true);
+      } else {
+        // La nube tiene datos de otra sesión/dispositivo → mezclar y subir
+        cloudSeeded = true;
+        if(val.data){
+          applyingRemote = true;
+          applyLoadedJson(JSON.stringify(val.data), {merge: true});
+          applyBrandToUI();
+          renderAll();
+          syncInvoiceNumField && syncInvoiceNumField();
+          syncSaleDateField && syncSaleDateField();
+          applyingRemote = false;
+          if(val.updated_at) lastKnownCloudUpdatedAt = val.updated_at;
+          setSyncStatus(true, "Actualizado desde la nube");
+        }
+        initialSyncPending = false;
+        saveState(); // subir el resultado de la mezcla
+      }
     } else {
-      // La nube tiene datos de otra sesión/dispositivo: combinar
-      cloudSeeded = true;
-      applyRemoteRow(row);
-      initialSyncPending = false;
+      // ── STREAMING EN TIEMPO REAL ─────────────────────────────────────────
+      // Actualización de otro dispositivo mientras esta sesión está abierta.
+      if(!val || !val.data) return;
+      if(val.client_id === CLIENT_ID) return; // eco de nosotros mismos → ignorar
+      applyRemoteRow(val);
     }
-  } catch(err){
-    console.warn("Error leyendo Supabase:", err);
-    // No liberamos initialSyncPending: si no podemos leer la nube, no subimos
-    // nada local para no arriesgar sobrescribir datos buenos que no vimos.
+  }, err => {
+    console.warn("Error en Firebase Realtime:", err);
+    // No liberamos initialSyncPending si falló antes de la primera lectura
     setSyncStatus(false, "Sin conexión a la nube (usando datos locales)");
-  }
-
-  // 2. Suscripción en tiempo real para recibir cambios de otros dispositivos
-  sbChannel = sbClient
-    .channel('studio_realtime')
-    .on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'studio_data',
-      filter: 'user_id=eq.' + sbUser.id
-    }, payload => {
-      const row = payload.new;
-      if(!row || !row.data) return;
-      if(row.client_id === CLIENT_ID) return; // eco de nosotros mismos → ignorar
-      applyRemoteRow(row);
-    })
-    .subscribe(status => {
-      if(status === 'SUBSCRIBED') setSyncStatus(true);
-      if(status === 'CLOSED' || status === 'CHANNEL_ERROR')
-        setSyncStatus(false, "Sin conexión a la nube (usando datos locales)");
-    });
-
-  // El WebSocket Realtime ya maneja la sincronización en tiempo real.
-  // El polling HTTP fue eliminado porque generaba egress excesivo (10+ GB/mes).
-  // Si el canal Realtime se cae, el usuario verá el indicador de sin conexión
-  // y los datos quedan guardados localmente hasta que la conexión se restaure.
+  });
 }
-sbClient.auth.onAuthStateChange(async (event, session) => {
-  const user = session ? session.user : null;
+fbAuth.onAuthStateChanged(async (user) => {
   if(user && user.email && user.email.toLowerCase() === AUTHORIZED_EMAIL.toLowerCase()){
-    sbUser = user;
+    fbUser = user;
     showApp();
     loadState();
     applyBrandToUI();
@@ -1339,11 +1276,11 @@ sbClient.auth.onAuthStateChange(async (event, session) => {
       syncSaleDateField();
     }
   } else if(user){
-    await sbClient.auth.signOut();
+    await fbAuth.signOut();
     showLogin("Este usuario no tiene acceso a este sistema.");
   } else {
-    sbUser = null;
-    if(sbChannel){ await sbClient.removeChannel(sbChannel); sbChannel = null; }
+    fbUser = null;
+    if(fbRef){ fbRef.off(); fbRef = null; }
     showLogin();
   }
 });
