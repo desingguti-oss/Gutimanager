@@ -6,6 +6,7 @@
 <title>Studio Manager — Sistema de Gestión</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -918,7 +919,7 @@ async function manualSave(){
     pendingCloudTimer = null;
     pendingCloudJson = null;
     const json = JSON.stringify(buildSavePayload());
-    localStorage.setItem(SAVE_KEY, json);
+    localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(json));
     // Push directo — el listener on('value') ya recibe cambios del otro PC
     const setOp = fbDb.ref('studio_data/' + fbUser.uid).set({
       data: JSON.parse(json),
@@ -1375,7 +1376,7 @@ function saveState(){
   try{
     const payload = buildSavePayload();
     const json = JSON.stringify(payload);
-    localStorage.setItem(SAVE_KEY, json);
+    localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(json));
     if(!applyingRemote) pushStateToCloud(json);
   }catch(e){
     console.warn("No se pudo guardar:", e);
@@ -1470,7 +1471,15 @@ function backfillPurchaseInvoiceIds(){
 function loadState(){
   const raw = localStorage.getItem(SAVE_KEY);
   if(!raw) return;
-  applyLoadedJson(raw);
+  // Intenta descomprimir (formato nuevo con LZ-String).
+  // Si el dato estaba sin comprimir (versión anterior), decompressFromUTF16
+  // devuelve null y se usa el raw directamente como fallback.
+  let json = raw;
+  try {
+    const dec = LZString.decompressFromUTF16(raw);
+    if(dec) json = dec;
+  } catch(e) { /* dato sin comprimir, usar raw */ }
+  applyLoadedJson(json);
 }
 function applyBrandToUI(){
   document.getElementById('brandName').textContent = STUDIO.name;
@@ -3975,7 +3984,7 @@ document.getElementById('restoreBackupInput')?.addEventListener('change', e=>{
       if(!parsed || !parsed.state){ toast('El archivo no tiene el formato esperado'); return; }
       const ok = confirm('Esto reemplazará TODA la información actual (ventas, facturas, clientes, inventario) con la del archivo de respaldo. ¿Deseas continuar?');
       if(!ok) return;
-      localStorage.setItem(SAVE_KEY, reader.result);
+      localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(reader.result));
       // Marca que este respaldo fue restaurado a propósito por la persona, así que
       // al recargar debe subirse a la nube tal cual está (sin esperar a comparar
       // primero con lo que haya en la nube) — de lo contrario la nube lo
