@@ -914,34 +914,20 @@ async function manualSave(){
   btn.classList.add('saving');
   lbl.textContent = 'Sincronizando…';
   try {
-    // ── PASO 1: PULL ─────────────────────────────────────────────────────
-    // Ver si el otro PC cambió algo entre medio para mezclarlo primero.
     clearTimeout(pendingCloudTimer);
     pendingCloudTimer = null;
     pendingCloudJson = null;
-    const ref = fbDb.ref('studio_data/' + fbUser.uid);
-    const snap = await ref.once('value');
-    const remote = snap.val();
-    if(remote && remote.data && remote.client_id !== CLIENT_ID){
-      applyingRemote = true;
-      applyLoadedJson(JSON.stringify(remote.data), {merge: true});
-      applyBrandToUI();
-      renderAll();
-      syncInvoiceNumField && syncInvoiceNumField();
-      syncSaleDateField && syncSaleDateField();
-      applyingRemote = false;
-    }
-
-    // ── PASO 2: PUSH ─────────────────────────────────────────────────────
-    const mergedJson = JSON.stringify(buildSavePayload());
-    localStorage.setItem(SAVE_KEY, mergedJson);
-    await ref.set({
-      data: JSON.parse(mergedJson),
+    const json = JSON.stringify(buildSavePayload());
+    localStorage.setItem(SAVE_KEY, json);
+    // Push directo — el listener on('value') ya recibe cambios del otro PC
+    const setOp = fbDb.ref('studio_data/' + fbUser.uid).set({
+      data: JSON.parse(json),
       updated_at: new Date().toISOString(),
       client_id: CLIENT_ID
     });
+    const timer = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000));
+    await Promise.race([setOp, timer]);
     lastKnownCloudUpdatedAt = new Date().toISOString();
-
     setSyncStatus(true);
     btn.classList.remove('saving');
     btn.classList.add('saved');
@@ -1143,11 +1129,13 @@ async function doCloudPush(){
   pendingCloudJson = null;
   try {
     // Firebase Realtime Database: set() reemplaza el nodo completo atómicamente.
-    await fbDb.ref('studio_data/' + fbUser.uid).set({
+    const setOp = fbDb.ref('studio_data/' + fbUser.uid).set({
       data: JSON.parse(toSend),
       updated_at: new Date().toISOString(),
       client_id: CLIENT_ID
     });
+    const timer = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000));
+    await Promise.race([setOp, timer]);
     lastKnownCloudUpdatedAt = new Date().toISOString();
     setSyncStatus(true);
   } catch(err){
@@ -1176,7 +1164,6 @@ window.addEventListener('beforeunload', flushPendingCloudSave);
 function applyRemoteRow(val){
   // val = { data, updated_at, client_id } — estructura guardada en Firebase
   if(!val || !val.data) return;
-  // Combina siempre con lo local para no perder registros de este dispositivo
   const jsonStr = JSON.stringify(val.data);
   if(val.updated_at) lastKnownCloudUpdatedAt = val.updated_at;
   applyingRemote = true;
@@ -1187,8 +1174,11 @@ function applyRemoteRow(val){
   syncSaleDateField();
   applyingRemote = false;
   setSyncStatus(true, "Actualizado desde la nube");
-  // Si la combinación añadió registros que la nube no tenía, subimos el resultado
-  saveState();
+  // NOTA: NO llamamos saveState() aquí porque eso causaría un ping-pong
+  // infinito entre los dos PCs (PC A guarda → PC B recibe → PC B guarda →
+  // PC A recibe → PC A guarda → ...). Los datos quedan en localStorage
+  // via applyLoadedJson; el usuario puede guardar manualmente si quiere
+  // subir algo adicional desde este PC.
 }
 function startCloudSync(){
   if(fbRef) return;
