@@ -1977,7 +1977,7 @@ function renderFacturas(){
       <td>${s.date.toLocaleDateString('es-CO')}</td>
       <td>#${s.id}</td>
       <td>${s.client}</td>
-      <td>${s.items.reduce((a,i)=>a+i.qty,0)}</td>
+      <td>${(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td>
       <td><b>${money(s.total)}</b></td>
       <td>${s.pay}</td>
       <td>${estado}</td>
@@ -1993,7 +1993,7 @@ function viewInvoice(id){
   document.getElementById('modalBody').innerHTML = `
     <p class="text-dim">${s.date.toLocaleString('es-CO')} · ${s.client} ${s.phone?('· '+s.phone):''} ${s.doc?('· CC '+s.doc):''}</p>
     <table><thead><tr><th>Producto</th><th>Cant</th><th>Precio</th><th>Subtotal</th></tr></thead><tbody>
-    ${s.items.map(i=>`<tr><td>${i.nombre}${i.talla?` <span class="psize">T-${i.talla}</span>`:''}</td><td>${i.qty}</td><td>${money(i.precio)}</td><td>${money(i.precio*i.qty)}</td></tr>`).join('')}
+    ${(s.items||[]).map(i=>`<tr><td>${i.nombre}${i.talla?` <span class="psize">T-${i.talla}</span>`:''}</td><td>${i.qty}</td><td>${money(i.precio)}</td><td>${money(i.precio*i.qty)}</td></tr>`).join('')}
     </tbody></table>
     ${s.discount?`<div class="cart-total-row mt8"><span>Subtotal</span><span>${money(s.subtotal)}</span></div>
       <div class="cart-total-row"><span>Descuento ${s.discount.type==='pct'?('('+s.discount.value+'%)'):''}</span><span style="color:var(--red)">- ${money(s.discount.amount)}</span></div>`:''}
@@ -2083,7 +2083,7 @@ function reutilizarFactura(id){
   requireAnularPassword(()=>{
     const s = state.sales.find(x=>x.id===id);
     if(!s){ toast('No se encontró la factura'); return; }
-    cart = s.items.map(i=>({...i}));
+    cart = (s.items||[]).map(i=>({...i}));
     document.getElementById('cartClientName').value = s.client;
     document.getElementById('cartClientPhone').value = s.phone||'';
     document.getElementById('cartClientDoc').value = s.doc||'';
@@ -2809,7 +2809,7 @@ function renderReportes(){
   drawDoughnut('chartPago', chartPago, Object.keys(payTotals).length?Object.keys(payTotals):["Sin datos"], Object.keys(payTotals).length?Object.values(payTotals):[1], c=>chartPago=c);
 
   const prodCounts = {};
-  validSales.forEach(s=>s.items.forEach(i=>{ prodCounts[i.nombre]=(prodCounts[i.nombre]||0)+i.qty; }));
+  validSales.forEach(s=>(s.items||[]).forEach(i=>{ prodCounts[i.nombre]=(prodCounts[i.nombre]||0)+i.qty; }));
   const top = Object.entries(prodCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
   if(chartsAvailable()){
     if(chartTop) chartTop.destroy();
@@ -3893,7 +3893,7 @@ function exportExcel(){
   // Hoja 1: Facturas — una fila por producto, con todos los datos clave
   const facturasRows = [];
   state.sales.forEach(s=>{
-    s.items.forEach(i=>{
+    (s.items||[]).forEach(i=>{
       facturasRows.push({
         "Factura": s.id,
         "Fecha": s.date.toLocaleDateString('es-CO'),
@@ -3948,7 +3948,7 @@ function exportXML(){
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<EstudioFotografico>\n  <Facturas>\n`;
   state.sales.forEach(s=>{
     xml += `    <Factura numero="${s.id}" fecha="${s.date.toISOString()}" cliente="${escapeXML(s.client)}" total="${s.total}" pago="${s.pay}" estado="${s.status}">\n`;
-    s.items.forEach(i=>{ xml += `      <Item nombre="${escapeXML(i.nombre)}" cantidad="${i.qty}" precio="${i.precio}"/>\n`; });
+    (s.items||[]).forEach(i=>{ xml += `      <Item nombre="${escapeXML(i.nombre)}" cantidad="${i.qty}" precio="${i.precio}"/>\n`; });
     xml += `    </Factura>\n`;
   });
   xml += `  </Facturas>\n  <Clientes>\n`;
@@ -4298,7 +4298,7 @@ function printInvoiceLetter(id){
           <th style="text-align:right;padding:8px;border-bottom:2px solid #ddd;">Subtotal</th>
         </tr></thead>
         <tbody>
-        ${s.items.map(i=>`<tr><td style="padding:8px;border-bottom:1px solid #eee;">${i.nombre}${i.talla?` (T-${i.talla})`:''}</td><td style="text-align:center;padding:8px;border-bottom:1px solid #eee;">${i.qty}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #eee;">${money(i.precio)}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #eee;">${money(i.precio*i.qty)}</td></tr>`).join('')}
+        ${(s.items||[]).map(i=>`<tr><td style="padding:8px;border-bottom:1px solid #eee;">${i.nombre}${i.talla?` (T-${i.talla})`:''}</td><td style="text-align:center;padding:8px;border-bottom:1px solid #eee;">${i.qty}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #eee;">${money(i.precio)}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #eee;">${money(i.precio*i.qty)}</td></tr>`).join('')}
         </tbody>
       </table>
       <div style="display:flex;justify-content:flex-end;">
