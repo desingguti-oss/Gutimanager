@@ -308,7 +308,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16c</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16d</div>
   </div>
 </div>
 
@@ -339,7 +339,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16c</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16d</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -2282,7 +2282,7 @@ function renderClientes(){
   });
   if(sorted.length===0){
     body.innerHTML = q
-      ? `<tr><td colspan="7"><div class="empty-state"><div class="ic">🔍</div>Sin resultados para "<b>${q}</b>"</div></td></tr>`
+      ? `<tr><td colspan="7"><div class="empty-state"><div class="ic">🔍</div>Sin resultados para "<b>${q}</b>"<br><br><button class="btn btn-ghost btn-sm" onclick="document.getElementById('clienteSearch').value='';renderClientes()">✕ Limpiar búsqueda y mostrar todos</button></div></td></tr>`
       : `<tr><td colspan="7"><div class="empty-state"><div class="ic">👥</div>Aún no hay clientes registrados</div></td></tr>`;
   } else {
     body.innerHTML = sorted.map(c=>{
@@ -2294,7 +2294,7 @@ function renderClientes(){
         <td><b>${money(c.totalSpent)}</b></td>
         <td>${favoriteProduct(c)}</td>
         <td><span class="badge ${seg.cls}">${seg.label}</span></td>
-        <td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="viewClientHistory('${c.name.replace(/'/g,"\\'")}')">📊</button> <button class="btn btn-ghost btn-sm ${c.manualVip?'':'btn-ghost'}" style="${c.manualVip?'color:var(--yellow);':''}" onclick="toggleClientVIP('${c.name.replace(/'/g,"\\'")}')">⭐ ${c.manualVip?'VIP':'VIP?'}</button> <button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="eliminarCliente('${c.name.replace(/'/g,"\\'")}')">🗑️</button></td>
+        <td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="viewClientHistory('${c.name.replace(/'/g,"\\'")}')">📊</button> <button class="btn btn-ghost btn-sm" onclick="editCliente('${c.name.replace(/'/g,"\\'")}')">✏️</button> <button class="btn btn-ghost btn-sm ${c.manualVip?'':'btn-ghost'}" style="${c.manualVip?'color:var(--yellow);':''}" onclick="toggleClientVIP('${c.name.replace(/'/g,"\\'")}')">⭐ ${c.manualVip?'VIP':'VIP?'}</button> <button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="eliminarCliente('${c.name.replace(/'/g,"\\'")}')">🗑️</button></td>
       </tr>`;
     }).join('');
   }
@@ -2325,6 +2325,51 @@ function viewClientHistory(clientName){
   document.getElementById('modalBody').innerHTML = html;
   document.getElementById('modalActions').innerHTML = `<button class="btn btn-primary" onclick="closeModal()">Cerrar</button>`;
   document.getElementById('modalDetail').classList.add('show');
+}
+
+/* ================= EDITAR CLIENTE ================= */
+function editCliente(clientName){
+  const c = state.clients.find(x=>x.name===clientName);
+  if(!c){ toast("Cliente no encontrado"); return; }
+  document.getElementById('modalTitle').textContent = 'Editar cliente';
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div><label style="font-size:12px;color:var(--text-dim);">Nombre</label>
+        <input class="input" id="editCliName" value="${(c.name||'').replace(/"/g,'&quot;')}" style="width:100%;"></div>
+      <div><label style="font-size:12px;color:var(--text-dim);">Teléfono</label>
+        <input class="input" id="editCliPhone" value="${(c.phone||'').replace(/"/g,'&quot;')}" style="width:100%;"></div>
+      <div><label style="font-size:12px;color:var(--text-dim);">Cédula / Documento</label>
+        <input class="input" id="editCliDoc" value="${(c.doc||'').replace(/"/g,'&quot;')}" style="width:100%;"></div>
+      <div class="text-dim" style="font-size:11.5px;">El cambio de nombre se aplica también a todas sus facturas y cotizaciones para no perder el historial.</div>
+      <div id="editCliErr" style="color:var(--red);font-size:12.5px;min-height:16px;"></div>
+    </div>`;
+  document.getElementById('modalActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" onclick="saveEditCliente('${clientName.replace(/'/g,"\\'")}')">Guardar cambios</button>`;
+  document.getElementById('modalDetail').classList.add('show');
+}
+function saveEditCliente(oldName){
+  const c = state.clients.find(x=>x.name===oldName);
+  if(!c){ toast("Cliente no encontrado"); return; }
+  const newName  = document.getElementById('editCliName').value.trim();
+  const newPhone = document.getElementById('editCliPhone').value.trim();
+  const newDoc   = document.getElementById('editCliDoc').value.trim();
+  const err = document.getElementById('editCliErr');
+  if(!newName){ err.textContent = 'El nombre no puede quedar vacío.'; return; }
+  // Evitar chocar con otro cliente que ya tenga ese nombre
+  const collision = state.clients.find(x=>x!==c && x.name.toLowerCase()===newName.toLowerCase());
+  if(collision){ err.textContent = 'Ya existe otro cliente con ese nombre. Usa un nombre distinto.'; return; }
+  // Propagar el cambio a facturas y cotizaciones para mantener el historial unido
+  if(newName !== oldName){
+    state.sales.forEach(s=>{ if(s.client===oldName){ s.client = newName; } });
+    state.quotes.forEach(q=>{ if(q.client===oldName){ q.client = newName; } });
+  }
+  state.sales.forEach(s=>{ if(s.client===newName){ if(newPhone) s.phone = newPhone; if(newDoc) s.doc = newDoc; } });
+  c.name = newName; c.phone = newPhone; c.doc = newDoc;
+  saveState();
+  closeModal();
+  renderAll();
+  toast('Cliente actualizado' + (newName!==oldName ? ' (facturas y cotizaciones incluidas)' : ''));
 }
 
 /* ================= CARTERA ================= */
