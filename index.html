@@ -308,7 +308,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16d</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16e</div>
   </div>
 </div>
 
@@ -339,7 +339,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16d</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16e</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -1100,6 +1100,7 @@ function applyLoadedJson(raw, opts){
       reviveDates();
       migrateSales();
       migrateCierreVentas();
+      sanitizeState();
     }
     if(data.studio) STUDIO = data.studio;
     if(data.logo) LOGO = data.logo;
@@ -1434,6 +1435,74 @@ function migrateSales(){
     }
   });
   backfillPurchaseInvoiceIds();
+}
+/* Repara registros dañados que pueden haber quedado de migraciones o de
+   mezclas entre dispositivos. Un solo registro con un campo faltante
+   (ej. un cliente sin nombre) hacía explotar pantallas completas.
+   Esta función se ejecuta en cada carga y deja los datos consistentes. */
+function sanitizeState(){
+  const repairs = [];
+  // Ventas
+  if(!Array.isArray(state.sales)) { state.sales = []; repairs.push('lista de ventas'); }
+  state.sales = state.sales.filter(s=>s && typeof s==='object');
+  state.sales.forEach(s=>{
+    if(!Array.isArray(s.items)){ s.items = []; repairs.push('items factura #'+s.id); }
+    if(!Array.isArray(s.payments)){ s.payments = []; repairs.push('pagos factura #'+s.id); }
+    if(typeof s.client !== 'string'){ s.client = String(s.client||'Cliente sin nombre'); repairs.push('cliente factura #'+s.id); }
+    if(typeof s.total !== 'number' || isNaN(s.total)){ s.total = (s.items||[]).reduce((a,i)=>a+(i.price||0)*(i.qty||0),0); repairs.push('total factura #'+s.id); }
+  });
+  // Clientes
+  if(!Array.isArray(state.clients)) { state.clients = []; repairs.push('lista de clientes'); }
+  state.clients = state.clients.filter(c=>c && typeof c==='object');
+  state.clients.forEach(c=>{
+    if(typeof c.name !== 'string' || !c.name.trim()){ c.name = 'Cliente sin nombre'; repairs.push('nombre de cliente'); }
+    if(typeof c.phone !== 'string'){ c.phone = String(c.phone||''); }
+    if(typeof c.doc !== 'string'){ c.doc = String(c.doc||''); }
+    if(!Array.isArray(c.purchases)){ c.purchases = []; repairs.push('compras de '+c.name); }
+    c.purchases = c.purchases.filter(p=>p && typeof p==='object');
+    c.purchases.forEach(p=>{
+      if(!Array.isArray(p.items)) p.items = [];
+      if(typeof p.total !== 'number' || isNaN(p.total)) p.total = 0;
+    });
+    if(typeof c.totalSpent !== 'number' || isNaN(c.totalSpent)){
+      c.totalSpent = c.purchases.reduce((a,p)=>a+(p.total||0),0);
+      repairs.push('total de '+c.name);
+    }
+  });
+  // Si dos clientes quedaron con el mismo nombre tras reparar, unirlos
+  const seenNames = new Map();
+  const uniqueClients = [];
+  state.clients.forEach(c=>{
+    const k = c.name.toLowerCase();
+    const prev = seenNames.get(k);
+    if(!prev){ seenNames.set(k, c); uniqueClients.push(c); }
+    else {
+      prev.purchases = prev.purchases.concat(c.purchases);
+      prev.totalSpent += c.totalSpent;
+      if(!prev.phone && c.phone) prev.phone = c.phone;
+      if(!prev.doc && c.doc) prev.doc = c.doc;
+      repairs.push('cliente duplicado: '+c.name);
+    }
+  });
+  state.clients = uniqueClients;
+  // Cotizaciones
+  if(!Array.isArray(state.quotes)) { state.quotes = []; repairs.push('lista de cotizaciones'); }
+  state.quotes = state.quotes.filter(q=>q && typeof q==='object');
+  state.quotes.forEach(q=>{
+    if(!Array.isArray(q.items)) q.items = [];
+    if(typeof q.client !== 'string') q.client = String(q.client||'Cliente sin nombre');
+  });
+  // Cierres de caja
+  if(!Array.isArray(state.cashClosures)) { state.cashClosures = []; repairs.push('lista de cierres'); }
+  state.cashClosures = state.cashClosures.filter(c=>c && typeof c==='object');
+  state.cashClosures.forEach(c=>{
+    if(!Array.isArray(c.gastos)) c.gastos = [];
+    if(!c.byPay || typeof c.byPay !== 'object') c.byPay = {};
+    if(typeof c.ventas !== 'number' || isNaN(c.ventas)) c.ventas = 0;
+  });
+  if(repairs.length){
+    console.warn('🔧 sanitizeState reparó:', repairs);
+  }
 }
 function migrateCierreVentas(){
   // Los cierres guardados antes del fix usaban totales de factura como "ventas".
