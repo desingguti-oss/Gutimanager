@@ -308,7 +308,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16e</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16f</div>
   </div>
 </div>
 
@@ -339,7 +339,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16e</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16f</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -921,10 +921,8 @@ async function manualSave(){
     pendingCloudTimer = null;
     pendingCloudJson = null;
     const json = JSON.stringify(buildSavePayload());
-    // Guardado local en su propio try: si falla (espacio agotado) la subida
-    // a Firebase debe continuar de todas formas — la nube es el respaldo real.
-    try { localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(json)); }
-    catch(le){ console.warn("Guardado local falló, subiendo a la nube igual:", le); }
+    // Guardado local diferido para no congelar el botón (la nube va primero).
+    scheduleLocalSave(json);
     // Push directo — el listener on('value') ya recibe cambios del otro PC
     const setOp = fbDb.ref('studio_data/' + fbUser.uid).set({
       data: JSON.parse(json),
@@ -1165,9 +1163,9 @@ function flushPendingCloudSave(){
   if(pendingCloudTimer){ clearTimeout(pendingCloudTimer); pendingCloudTimer = null; }
   doCloudPush();
 }
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') flushPendingCloudSave(); });
-window.addEventListener('pagehide', flushPendingCloudSave);
-window.addEventListener('beforeunload', flushPendingCloudSave);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ flushPendingCloudSave(); if(typeof flushLocalSave==='function') flushLocalSave(); } });
+window.addEventListener('pagehide', ()=>{ flushPendingCloudSave(); if(typeof flushLocalSave==='function') flushLocalSave(); });
+window.addEventListener('beforeunload', ()=>{ flushPendingCloudSave(); if(typeof flushLocalSave==='function') flushLocalSave(); });
 function applyRemoteRow(val){
   // val = { data, updated_at, client_id } — estructura guardada en Firebase
   if(!val || !val.data) return;
@@ -1391,6 +1389,33 @@ function getDayPayments(dateObj){
 /* ================= PERSISTENCIA (localStorage) ================= */
 const SAVE_KEY = "studio_manager_data_v1";
 let lastSaveErrorToastAt = 0;
+/* El guardado local (comprimir + escribir) es pesado y congelaba la interfaz
+   en cada clic. Ahora se hace unos milisegundos DESPUÉS, cuando la pantalla
+   ya respondió. Si la persona cierra la pestaña antes, flushLocalSave() lo
+   ejecuta de inmediato (ver listeners de pagehide/visibilitychange). */
+let localSaveTimer = null;
+let pendingLocalJson = null;
+function scheduleLocalSave(json){
+  pendingLocalJson = json;
+  clearTimeout(localSaveTimer);
+  localSaveTimer = setTimeout(flushLocalSave, 120);
+}
+function flushLocalSave(){
+  if(pendingLocalJson===null) return;
+  const j = pendingLocalJson;
+  pendingLocalJson = null;
+  clearTimeout(localSaveTimer); localSaveTimer = null;
+  try{
+    localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(j));
+  }catch(e){
+    console.warn("No se pudo guardar localmente:", e);
+    const now = Date.now();
+    if(now - lastSaveErrorToastAt > 8000){
+      lastSaveErrorToastAt = now;
+      toast('⚠️ El guardado local falló, pero los datos se están subiendo a la nube. Descarga un respaldo por seguridad.');
+    }
+  }
+}
 function saveState(){
   let json = null;
   try{
@@ -1400,19 +1425,8 @@ function saveState(){
     toast('⚠️ Error interno al preparar los datos. Avisa con una captura de la consola (F12).');
     return;
   }
-  // 1. Guardado local — si falla (ej. espacio agotado) NO debe impedir
-  //    la subida a la nube. Antes un fallo aquí abortaba todo y las ventas
-  //    del día nunca llegaban a Firebase.
-  try{
-    localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(json));
-  }catch(e){
-    console.warn("No se pudo guardar localmente:", e);
-    const now = Date.now();
-    if(now - lastSaveErrorToastAt > 8000){
-      lastSaveErrorToastAt = now;
-      toast('⚠️ El guardado local falló, pero los datos se están subiendo a la nube. Descarga un respaldo por seguridad.');
-    }
-  }
+  // 1. Guardado local diferido — no congela la pantalla.
+  scheduleLocalSave(json);
   // 2. Subida a la nube — SIEMPRE se intenta, pase lo que pase con el local.
   if(!applyingRemote) pushStateToCloud(json);
 }
@@ -1628,7 +1642,9 @@ function renderView(v){
     catch(e){ console.error('⚠️ Error dibujando vista "'+v+'":', e); }
   });
 }
+let currentView = 'dashboard';
 function goToView(v){
+  currentView = v;
   document.querySelectorAll('.nav-item').forEach(i=>i.classList.toggle('active', i.dataset.view===v));
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
@@ -1987,6 +2003,9 @@ document.getElementById('btnCheckout').addEventListener('click', ()=>{
   cart.forEach(c=>{ const p = PRODUCTS.find(x=>x.ean===c.ean); if(p) descontarStock(p, c.qty, c.talla||''); });
   state.sales.push(invoice);
   lastSale = invoice;
+  // GUARDAR PRIMERO, mostrar después: si algo falla dibujando el resumen,
+  // la factura ya quedó guardada y subida a la nube.
+  saveState();
   const saldo = saleSaldo(invoice);
   document.getElementById('checkoutSummary').innerHTML = `
     <p><b>Factura #${invoice.id}</b> · ${invoice.client}</p>
@@ -2012,6 +2031,7 @@ document.getElementById('btnQuote').addEventListener('click', ()=>{
     discount: t.discountAmount>0 ? {type:t.dt, value:t.dv, amount:t.discountAmount} : null,
     total:t.total, status:"Vigente", notes: notes || null };
   state.quotes.push(quote);
+  saveState(); // guardar primero, mostrar después
   toast(`Cotización #${quote.id} guardada · vence ${vence.toLocaleDateString('es-CO')}`);
   resetCartForm();
   renderCart(); renderAll();
@@ -3790,7 +3810,11 @@ function doCloseCaja(overwrite){
   document.getElementById('sueldoValue').value=''; document.getElementById('sueldoMethod').value='';
   saveState();
   toast('Caja cerrada. El día reinicia en $0.');
-  printCierre(snap);
+  // La impresión NUNCA debe poder impedir que el cierre quede guardado y
+  // la pantalla actualizada: si falla, se avisa y se puede reimprimir
+  // desde el historial de cierres.
+  try{ printCierre(snap); }
+  catch(e){ console.error('⚠️ Error imprimiendo el cierre:', e); toast('El cierre quedó guardado, pero falló la impresión. Reimprime desde el historial.'); }
   renderAll();
 }
 document.getElementById('btnCerrarCaja').addEventListener('click', ()=>{
@@ -4502,36 +4526,12 @@ function sendInvoiceWhatsApp(id){
    importante — el guardado y la sincronización NO se interrumpen.
    Antes, un solo registro corrupto congelaba todo el sistema en
    "Sincronizando…" y bloqueaba la subida a la nube en silencio. */
+/* Antes esto redibujaba las 15 pantallas en cada guardado (gráficas incluidas),
+   congelando la interfaz medio segundo por clic. Ahora solo redibuja la
+   pantalla que la persona está viendo — las demás se dibujan frescas cuando
+   se abren (goToView → renderView). El guardado sigue ocurriendo siempre. */
 function renderAll(){
-  const modules = [
-    ['CatFilters', renderCatFilters],
-    ['InvStockFilters', renderInvStockFilters],
-    ['ProductGrid', renderProductGrid],
-    ['Cart', renderCart],
-    ['Dashboard', renderDashboard],
-    ['Facturas', renderFacturas],
-    ['Cotizaciones', renderCotizaciones],
-    ['Clientes', renderClientes],
-    ['Cartera', renderCartera],
-    ['Inventory', renderInventory],
-    ['InvStock', renderInvStock],
-    ['Reportes', renderReportes],
-    ['Cierre', renderCierre],
-    ['MarcosRefList', renderMarcosRefList],
-    ['VinilosSelect', renderVinilosSelect],
-  ];
-  const broken = [];
-  modules.forEach(([name, fn])=>{
-    try{ fn(); }
-    catch(e){ broken.push(name); console.error('⚠️ Error dibujando módulo "'+name+'":', e); }
-  });
-  if(adminUnlocked){
-    try{ renderAdminProducts(); }
-    catch(e){ console.error('⚠️ Error dibujando módulo "AdminProducts":', e); }
-  }
-  if(broken.length){
-    toast('⚠️ Hubo un problema mostrando: ' + broken.join(', ') + '. Los datos están a salvo. Envía captura de la consola (F12).');
-  }
+  renderView(currentView);
   try{ saveState(); }
   catch(e){ console.error('⚠️ Error en saveState desde renderAll:', e); }
 }
