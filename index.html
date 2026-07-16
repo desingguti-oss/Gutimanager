@@ -308,7 +308,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16b</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16c</div>
   </div>
 </div>
 
@@ -339,7 +339,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16b</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16c</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -1535,12 +1535,36 @@ const titles = {dashboard:"Inicio", venta:"Nueva Venta", facturas:"Facturas", co
   clientes:"Clientes", cartera:"Cartera", inventarios:"Inventarios", inventario:"Lista de Precios", reportes:"Reportes", exportar:"Exportar Datos",
   cierre:"Cierre de Caja", admin:"Administración"};
 
+/* Dibuja SOLO la pantalla que se va a mostrar. Navegar entre módulos no
+   cambia ningún dato, así que no hay razón para redibujar las 15 pantallas
+   ni volver a guardar/comprimir todo (eso hacía lenta la navegación). */
+function renderView(v){
+  const map = {
+    dashboard:      [renderDashboard],
+    venta:          [renderCatFilters, renderProductGrid, renderCart],
+    facturas:       [renderFacturas],
+    cotizaciones:   [renderCotizaciones],
+    cotizadorMarcos:[renderMarcosRefList, renderVinilosSelect],
+    clientes:       [renderClientes],
+    cartera:        [renderCartera],
+    inventarios:    [renderInvStockFilters, renderInvStock],
+    inventario:     [renderInventory],
+    reportes:       [renderReportes],
+    exportar:       [],
+    cierre:         [renderCierre],
+    admin:          adminUnlocked ? [renderAdminProducts] : [],
+  };
+  (map[v]||[]).forEach(fn=>{
+    try{ fn(); }
+    catch(e){ console.error('⚠️ Error dibujando vista "'+v+'":', e); }
+  });
+}
 function goToView(v){
   document.querySelectorAll('.nav-item').forEach(i=>i.classList.toggle('active', i.dataset.view===v));
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
   document.getElementById('pageTitle').textContent = titles[v];
-  renderAll();
+  renderView(v); // solo la vista que se abre — navegación instantánea
 }
 document.querySelectorAll('.nav-item').forEach(item=>{
   item.addEventListener('click', ()=>goToView(item.dataset.view));
