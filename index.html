@@ -308,7 +308,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16f</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16g</div>
   </div>
 </div>
 
@@ -339,7 +339,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16f</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16g</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -1464,6 +1464,9 @@ function sanitizeState(){
     if(!Array.isArray(s.payments)){ s.payments = []; repairs.push('pagos factura #'+s.id); }
     if(typeof s.client !== 'string'){ s.client = String(s.client||'Cliente sin nombre'); repairs.push('cliente factura #'+s.id); }
     if(typeof s.total !== 'number' || isNaN(s.total)){ s.total = (s.items||[]).reduce((a,i)=>a+(i.price||0)*(i.qty||0),0); repairs.push('total factura #'+s.id); }
+    // Migración: de un solo comprobante (s.proof) a varios (s.proofs)
+    if(!Array.isArray(s.proofs)){ s.proofs = s.proof ? [s.proof] : []; }
+    if(s.proof !== undefined) delete s.proof;
   });
   // Clientes
   if(!Array.isArray(state.clients)) { state.clients = []; repairs.push('lista de clientes'); }
@@ -1996,7 +1999,7 @@ document.getElementById('btnCheckout').addEventListener('click', ()=>{
     discount: t.discountAmount>0 ? {type:t.dt, value:t.dv, amount:t.discountAmount} : null,
     total: t.total, pay: payLabel,
     payments, status,
-    notes: notes || null, proof
+    notes: notes || null, proofs: proof ? [proof] : []
   };
   registerPurchase(client, cart, t.total, invoiceId);
   // descontar inventario
@@ -2041,6 +2044,43 @@ function closeModal(){
   document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('show'));
 }
 
+/* Convierte una imagen a dataURL comprimido (JPEG, máx 1000px de lado).
+   Fotos de celular de 3-5MB quedan en ~100-200KB sin perder legibilidad
+   del comprobante. Si el archivo no es una imagen válida, se guarda tal cual. */
+function fileToCompressedDataURL(file, maxDim, quality){
+  maxDim = maxDim || 1000; quality = quality || 0.7;
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onload = ()=>{
+        try{
+          let w = img.width, h = img.height;
+          const scale = Math.min(1, maxDim / Math.max(w, h));
+          w = Math.round(w*scale); h = Math.round(h*scale);
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(cv.toDataURL('image/jpeg', quality));
+        }catch(e){ resolve(reader.result); }
+      };
+      img.onerror = ()=>resolve(reader.result);
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+/* Eliminar un comprobante específico de una factura */
+function removeProof(saleId, idx){
+  const s = state.sales.find(x=>x.id===saleId);
+  if(!s || !Array.isArray(s.proofs) || s.proofs[idx]===undefined) return;
+  if(!confirm('¿Eliminar este comprobante de pago?')) return;
+  s.proofs.splice(idx, 1);
+  saveState();
+  toast('Comprobante eliminado');
+  viewInvoice(saleId);
+}
 /* Visor de imágenes (comprobantes) — evita usar window.open con base64 que se queda trabado */
 function viewProofImage(src){
   if(!src){ toast('No hay imagen para mostrar'); return; }
@@ -2138,8 +2178,8 @@ function viewInvoice(id){
     ${(s.payments&&s.payments.length)?`<div class="text-dim mt8"><b>Pagos recibidos:</b>${s.payments.map((p,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px;"><span>${p.date.toLocaleDateString('es-CO')} — <b>${money(p.amount)}</b> (${p.method})</span><button class="btn btn-ghost btn-sm" style="padding:1px 7px;font-size:11px;min-height:0;" onclick="editPago(${id},${i})">✏️ Editar</button></div>`).join('')}</div>`:''}
     ${saldo>0?`<p class="mt8"><b style="color:var(--yellow)">Saldo pendiente: ${money(saldo)}</b></p>`:''}
     ${s.notes?`<p class="text-dim mt8"><b>Observaciones:</b> ${s.notes}</p>`:''}
-    ${hasDigitalPayment && !s.proof?`<div class="proof-upload" onclick="document.getElementById('invoiceProofInput').click()" style="margin-top:10px;">📎 Adjuntar comprobante de pago</div><input type="file" id="invoiceProofInput" accept="image/*" style="display:none;">`:``}
-    ${s.proof?`<p class="text-dim mt8"><b>Comprobante de pago:</b><br><img src="${s.proof}" class="proof-thumb" style="display:block;cursor:pointer;max-width:220px;" onclick="viewProofImage(state.sales.find(x=>x.id===${id}).proof)"></p>`:''}
+    ${hasDigitalPayment?`<div class="proof-upload" onclick="document.getElementById('invoiceProofInput').click()" style="margin-top:10px;">📎 Adjuntar comprobante(s) de pago — puedes elegir varios a la vez</div><input type="file" id="invoiceProofInput" accept="image/*" multiple style="display:none;">`:``}
+    ${(s.proofs&&s.proofs.length)?`<div class="text-dim mt8"><b>Comprobantes de pago (${s.proofs.length}):</b><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">${s.proofs.map((p,pi)=>`<div style="position:relative;display:inline-block;"><img src="${p}" class="proof-thumb" style="max-width:140px;max-height:120px;margin:0;" onclick="viewProofImage(state.sales.find(x=>x.id===${id}).proofs[${pi}])"><button class="btn btn-ghost btn-sm" title="Eliminar comprobante" style="position:absolute;top:2px;right:2px;color:var(--red);padding:0 7px;min-height:0;background:rgba(0,0,0,.6);border-radius:6px;" onclick="removeProof(${id},${pi})">✕</button></div>`).join('')}</div></div>`:''}
     <div class="modal-print-row">
       <button class="btn btn-ghost btn-sm" onclick="printTicket(state.sales.find(x=>x.id===${id}))">🖨️ Ticket</button>
       <button class="btn btn-ghost btn-sm" onclick="printInvoiceLetter(${id})">🖨️ Factura carta</button>
@@ -2147,18 +2187,24 @@ function viewInvoice(id){
       ${s.status!=='Anulada'?`<button class="btn btn-ghost btn-sm" style="color:var(--yellow);" onclick="reutilizarFactura(${id})">♻️ Usar para nueva</button>`:''}
     </div>`;
 
-  if(hasDigitalPayment && !s.proof){
-    document.getElementById('invoiceProofInput').addEventListener('change', (e)=>{
-      const file = e.target.files[0];
-      if(!file) return;
-      const reader = new FileReader();
-      reader.onload = ()=>{
-        s.proof = reader.result;
-        saveState();
-        toast('Comprobante adjuntado');
-        viewInvoice(id);
-      };
-      reader.readAsDataURL(file);
+  if(hasDigitalPayment){
+    document.getElementById('invoiceProofInput').addEventListener('change', async (e)=>{
+      const files = Array.from(e.target.files||[]);
+      if(!files.length) return;
+      toast('Procesando ' + files.length + ' imagen(es)…');
+      if(!Array.isArray(s.proofs)) s.proofs = [];
+      for(const f of files){
+        try{
+          // Comprimir cada imagen antes de guardarla: una foto de celular pesa
+          // 3-5MB; comprimida queda en ~100-200KB. Sin esto, unos pocos
+          // comprobantes llenarían el almacenamiento otra vez.
+          const durl = await fileToCompressedDataURL(f);
+          s.proofs.push(durl);
+        }catch(err){ console.warn('No se pudo procesar un archivo:', err); }
+      }
+      saveState();
+      toast(files.length===1 ? 'Comprobante adjuntado' : files.length+' comprobantes adjuntados');
+      viewInvoice(id);
     });
   }
 
@@ -2665,7 +2711,7 @@ function saveOldCartera(){
     items: [], subtotal: total, discount: null,
     total, pay: 'Cartera antigua',
     payments, status,
-    notes: notes || 'Factura antigua (registro anterior)', proof: null,
+    notes: notes || 'Factura antigua (registro anterior)', proofs: [],
     legacy: true
   };
   registerPurchase(client, [], total, invNum);
@@ -4217,7 +4263,7 @@ function printTicket(sale){
       <div style="font-size:12px;">Forma de pago: ${sale.pay} · Estado: ${sale.status}</div>
       ${saleSaldo(sale)>0?`<div style="font-size:12px;">Abonado: ${money(salePaid(sale))} · Saldo: <b>${money(saleSaldo(sale))}</b></div>`:''}
       ${sale.notes?`<div style="text-align:left;font-size:11.5px;margin-top:6px;"><b>Observaciones:</b> ${sale.notes}</div>`:''}
-      ${sale.proof?`<div style="margin-top:10px;"><div style="font-size:11px;color:#444;">Comprobante de pago digital:</div><img src="${sale.proof}" style="max-width:220px;max-height:220px;object-fit:contain;border:1px solid #ccc;margin-top:4px;"></div>`:''}
+      ${(sale.proofs&&sale.proofs.length)?`<div style="margin-top:10px;"><div style="font-size:11px;color:#444;">Comprobante(s) de pago digital:</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${sale.proofs.map(p=>`<img src="${p}" style="max-width:220px;max-height:220px;object-fit:contain;border:1px solid #ccc;margin-top:4px;">`).join('')}</div></div>`:''}
       <hr>
       <div style="font-size:11.5px;">¡Gracias por su compra!</div>
     </div>`;
