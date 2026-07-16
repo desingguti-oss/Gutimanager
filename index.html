@@ -308,7 +308,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16b</div>
   </div>
 </div>
 
@@ -339,7 +339,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16b</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -1196,49 +1196,62 @@ function startCloudSync(){
   // cada cambio. Usamos 'firstFire' para separar la carga inicial del
   // streaming en tiempo real posterior.
   ref.on('value', snap => {
-    const val = snap.val();
+    const isFirst = firstFire;
+    firstFire = false;
+    try {
+      const val = snap.val();
 
-    if(firstFire){
-      firstFire = false;
-      if(!val){
-        // Nube vacía: este dispositivo tiene los datos buenos → los sube
-        cloudSeeded = true;
-        initialSyncPending = false;
-        const hasLocalData = (state.sales && state.sales.length) ||
-          (state.clients && state.clients.length) ||
-          (state.quotes && state.quotes.length) ||
-          (state.cashClosures && state.cashClosures.length);
-        if(hasLocalData) saveState();
-        setSyncStatus(true, "Nube lista");
-      } else if(val.client_id === CLIENT_ID){
-        // La nube tiene exactamente lo que este dispositivo subió → sin cambios
-        if(val.updated_at) lastKnownCloudUpdatedAt = val.updated_at;
-        cloudSeeded = true;
-        initialSyncPending = false;
-        setSyncStatus(true);
-      } else {
-        // La nube tiene datos de otra sesión/dispositivo → mezclar y subir
-        cloudSeeded = true;
-        if(val.data){
-          applyingRemote = true;
-          applyLoadedJson(JSON.stringify(val.data), {merge: true});
-          applyBrandToUI();
-          renderAll();
-          syncInvoiceNumField && syncInvoiceNumField();
-          syncSaleDateField && syncSaleDateField();
-          applyingRemote = false;
+      if(isFirst){
+        if(!val){
+          // Nube vacía: este dispositivo tiene los datos buenos → los sube
+          cloudSeeded = true;
+          initialSyncPending = false;
+          const hasLocalData = (state.sales && state.sales.length) ||
+            (state.clients && state.clients.length) ||
+            (state.quotes && state.quotes.length) ||
+            (state.cashClosures && state.cashClosures.length);
+          if(hasLocalData) saveState();
+          setSyncStatus(true, "Nube lista");
+        } else if(val.client_id === CLIENT_ID){
+          // La nube tiene exactamente lo que este dispositivo subió → sin cambios
           if(val.updated_at) lastKnownCloudUpdatedAt = val.updated_at;
-          setSyncStatus(true, "Actualizado desde la nube");
+          cloudSeeded = true;
+          initialSyncPending = false;
+          setSyncStatus(true);
+        } else {
+          // La nube tiene datos de otra sesión/dispositivo → mezclar y subir
+          cloudSeeded = true;
+          if(val.data){
+            applyingRemote = true;
+            applyLoadedJson(JSON.stringify(val.data), {merge: true});
+            applyBrandToUI();
+            renderAll();
+            syncInvoiceNumField && syncInvoiceNumField();
+            syncSaleDateField && syncSaleDateField();
+            applyingRemote = false;
+            if(val.updated_at) lastKnownCloudUpdatedAt = val.updated_at;
+            setSyncStatus(true, "Actualizado desde la nube");
+          }
+          initialSyncPending = false;
+          saveState(); // subir el resultado de la mezcla
         }
-        initialSyncPending = false;
-        saveState(); // subir el resultado de la mezcla
+      } else {
+        // ── STREAMING EN TIEMPO REAL ─────────────────────────────────────────
+        // Actualización de otro dispositivo mientras esta sesión está abierta.
+        if(!val || !val.data) return;
+        if(val.client_id === CLIENT_ID) return; // eco de nosotros mismos → ignorar
+        applyRemoteRow(val);
       }
-    } else {
-      // ── STREAMING EN TIEMPO REAL ─────────────────────────────────────────
-      // Actualización de otro dispositivo mientras esta sesión está abierta.
-      if(!val || !val.data) return;
-      if(val.client_id === CLIENT_ID) return; // eco de nosotros mismos → ignorar
-      applyRemoteRow(val);
+    } catch(err) {
+      // BLINDAJE: si algo explota aplicando los datos, NUNCA debemos quedar
+      // congelados en "Sincronizando…" ni bloquear las subidas futuras.
+      console.error("⚠️ Error aplicando datos de la nube:", err);
+      setSyncStatus(false, "Error al aplicar datos de la nube");
+      toast('⚠️ Hubo un error aplicando los datos de la nube. Envía captura de la consola (F12).');
+    } finally {
+      // Pase lo que pase, liberar los candados para que el sistema siga vivo.
+      applyingRemote = false;
+      if(isFirst) initialSyncPending = false;
     }
   }, err => {
     console.warn("Error en Firebase Realtime:", err);
@@ -4346,24 +4359,43 @@ function sendInvoiceWhatsApp(id){
 }
 
 /* ================= RENDER ALL ================= */
+/* Cada módulo se dibuja dentro de su propio try/catch: si un dato dañado
+   hace fallar UNA pantalla, las demás siguen funcionando y — lo más
+   importante — el guardado y la sincronización NO se interrumpen.
+   Antes, un solo registro corrupto congelaba todo el sistema en
+   "Sincronizando…" y bloqueaba la subida a la nube en silencio. */
 function renderAll(){
-  renderCatFilters();
-  renderInvStockFilters();
-  renderProductGrid();
-  renderCart();
-  renderDashboard();
-  renderFacturas();
-  renderCotizaciones();
-  renderClientes();
-  renderCartera();
-  renderInventory();
-  renderInvStock();
-  renderReportes();
-  renderCierre();
-  renderMarcosRefList();
-  renderVinilosSelect();
-  if(adminUnlocked) renderAdminProducts();
-  saveState();
+  const modules = [
+    ['CatFilters', renderCatFilters],
+    ['InvStockFilters', renderInvStockFilters],
+    ['ProductGrid', renderProductGrid],
+    ['Cart', renderCart],
+    ['Dashboard', renderDashboard],
+    ['Facturas', renderFacturas],
+    ['Cotizaciones', renderCotizaciones],
+    ['Clientes', renderClientes],
+    ['Cartera', renderCartera],
+    ['Inventory', renderInventory],
+    ['InvStock', renderInvStock],
+    ['Reportes', renderReportes],
+    ['Cierre', renderCierre],
+    ['MarcosRefList', renderMarcosRefList],
+    ['VinilosSelect', renderVinilosSelect],
+  ];
+  const broken = [];
+  modules.forEach(([name, fn])=>{
+    try{ fn(); }
+    catch(e){ broken.push(name); console.error('⚠️ Error dibujando módulo "'+name+'":', e); }
+  });
+  if(adminUnlocked){
+    try{ renderAdminProducts(); }
+    catch(e){ console.error('⚠️ Error dibujando módulo "AdminProducts":', e); }
+  }
+  if(broken.length){
+    toast('⚠️ Hubo un problema mostrando: ' + broken.join(', ') + '. Los datos están a salvo. Envía captura de la consola (F12).');
+  }
+  try{ saveState(); }
+  catch(e){ console.error('⚠️ Error en saveState desde renderAll:', e); }
 }
 /* El arranque (loadState/applyBrandToUI/renderAll) ahora ocurre dentro de
    fbAuth.onAuthStateChanged una vez que el usuario inicia sesión correctamente. */
