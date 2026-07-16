@@ -919,7 +919,10 @@ async function manualSave(){
     pendingCloudTimer = null;
     pendingCloudJson = null;
     const json = JSON.stringify(buildSavePayload());
-    localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(json));
+    // Guardado local en su propio try: si falla (espacio agotado) la subida
+    // a Firebase debe continuar de todas formas — la nube es el respaldo real.
+    try { localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(json)); }
+    catch(le){ console.warn("Guardado local falló, subiendo a la nube igual:", le); }
     // Push directo — el listener on('value') ya recibe cambios del otro PC
     const setOp = fbDb.ref('studio_data/' + fbUser.uid).set({
       data: JSON.parse(json),
@@ -1373,23 +1376,29 @@ function getDayPayments(dateObj){
 const SAVE_KEY = "studio_manager_data_v1";
 let lastSaveErrorToastAt = 0;
 function saveState(){
+  let json = null;
   try{
-    const payload = buildSavePayload();
-    const json = JSON.stringify(payload);
-    localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(json));
-    if(!applyingRemote) pushStateToCloud(json);
+    json = JSON.stringify(buildSavePayload());
   }catch(e){
-    console.warn("No se pudo guardar:", e);
-    // Antes esto fallaba en completo silencio (solo en la consola, que nadie ve).
-    // Si el guardado local falla (por ejemplo, espacio agotado en el navegador),
-    // es crítico avisar de inmediato: significa que lo que se está haciendo
-    // ahora mismo NO se está guardando ni localmente ni en la nube.
+    console.warn("No se pudo serializar el estado:", e);
+    toast('⚠️ Error interno al preparar los datos. Avisa con una captura de la consola (F12).');
+    return;
+  }
+  // 1. Guardado local — si falla (ej. espacio agotado) NO debe impedir
+  //    la subida a la nube. Antes un fallo aquí abortaba todo y las ventas
+  //    del día nunca llegaban a Firebase.
+  try{
+    localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(json));
+  }catch(e){
+    console.warn("No se pudo guardar localmente:", e);
     const now = Date.now();
     if(now - lastSaveErrorToastAt > 8000){
       lastSaveErrorToastAt = now;
-      toast('⚠️ No se pudo guardar el último cambio. Descarga un respaldo y avisa — puede haber un problema serio.');
+      toast('⚠️ El guardado local falló, pero los datos se están subiendo a la nube. Descarga un respaldo por seguridad.');
     }
   }
+  // 2. Subida a la nube — SIEMPRE se intenta, pase lo que pase con el local.
+  if(!applyingRemote) pushStateToCloud(json);
 }
 const BASE_EANS = new Set(PRODUCTS.map(p=>p.ean));
 function reviveDates(){
@@ -3967,9 +3976,13 @@ function downloadFile(content, filename, type){
 /* ================= RESPALDO COMPLETO (.json) ================= */
 function exportBackup(){
   try{
-    const raw = localStorage.getItem(SAVE_KEY);
-    if(!raw){ toast('No hay datos guardados todavía'); return; }
-    downloadFile(raw, `respaldo_studio_${new Date().toISOString().slice(0,10)}.json`, "application/json");
+    // IMPORTANTE: el respaldo se genera desde los datos VIVOS en memoria
+    // (lo que se ve en pantalla ahora mismo), NO desde localStorage.
+    // Antes se exportaba localStorage, que podía estar viejo/incompleto si
+    // el guardado local había estado fallando (espacio lleno), y además
+    // ahora localStorage está comprimido y saldría ilegible.
+    const json = JSON.stringify(buildSavePayload());
+    downloadFile(json, `respaldo_studio_${new Date().toISOString().slice(0,10)}.json`, "application/json");
     toast('Respaldo descargado. Guárdalo en un lugar seguro (Drive, USB, correo, etc.)');
   }catch(e){ toast('No se pudo generar el respaldo'); console.warn(e); }
 }
