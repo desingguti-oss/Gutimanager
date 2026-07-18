@@ -308,7 +308,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.16g</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.17</div>
   </div>
 </div>
 
@@ -339,7 +339,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.16g</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.17</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -816,6 +816,12 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           <input type="file" id="restoreBackupInput" accept="application/json" style="display:none;">
         </div>
       </div>
+      <div class="card mt16">
+        <div class="section-title mb0">Estado de los datos</div>
+        <p class="text-dim" style="font-size:12.5px;">Cuánto pesan los datos del sistema y cuánto de eso son imágenes (comprobantes y logo). Útil para vigilar el crecimiento con los años.</p>
+        <div id="dataSizeInfo" class="text-dim" style="font-size:13px;margin-top:8px;">Calculando…</div>
+        <button class="btn btn-ghost mt8" onclick="renderDataSize()">🔄 Recalcular</button>
+      </div>
     </section>
 
   </main>
@@ -929,7 +935,8 @@ async function manualSave(){
       updated_at: new Date().toISOString(),
       client_id: CLIENT_ID
     });
-    const timer = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000));
+    const timeoutMs = 10000 + Math.min(90000, Math.round(json.length/1048576*15000));
+    const timer = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),timeoutMs));
     await Promise.race([setOp, timer]);
     lastKnownCloudUpdatedAt = new Date().toISOString();
     setSyncStatus(true);
@@ -1139,17 +1146,30 @@ async function doCloudPush(){
       updated_at: new Date().toISOString(),
       client_id: CLIENT_ID
     });
-    const timer = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000));
+    // Tiempo de espera proporcional al tamaño: 10s base + ~15s por cada MB.
+    // Con comprobantes adjuntos el paquete pesa más y en internet lenta
+    // los 8s fijos de antes cortaban subidas que iban bien.
+    const timeoutMs = 10000 + Math.min(90000, Math.round(toSend.length/1048576*15000));
+    const timer = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),timeoutMs));
     await Promise.race([setOp, timer]);
+    cloudRetryCount = 0;
     lastKnownCloudUpdatedAt = new Date().toISOString();
     setSyncStatus(true);
   } catch(err){
     pendingCloudJson = toSend; // devolver para reintentar
     console.warn("Error guardando en Firebase:", err);
-    setSyncStatus(false, "Sin conexión a la nube (guardado local)");
-    toast('No se pudo subir el último cambio a la nube. Sigue guardado en este computador.');
+    setSyncStatus(false, "Sin conexión a la nube (reintentando…)");
+    // REINTENTO AUTOMÁTICO: antes el sistema quedaba en rojo esperando a que
+    // la persona guardara algo más. Ahora reintenta solo: 10s, 20s, 40s… máx 2 min.
+    cloudRetryCount = Math.min(cloudRetryCount + 1, 5);
+    const waitMs = Math.min(120000, 10000 * Math.pow(2, cloudRetryCount - 1));
+    clearTimeout(cloudRetryTimer);
+    cloudRetryTimer = setTimeout(()=>{ doCloudPush(); }, waitMs);
+    if(cloudRetryCount === 1) toast('No se pudo subir a la nube. Reintentando automáticamente…');
   }
 }
+let cloudRetryCount = 0;
+let cloudRetryTimer = null;
 function pushStateToCloud(json){
   if(initialSyncPending) return; // todavía no sabemos qué hay en la nube: no subimos nada
   pendingCloudJson = json;
@@ -1185,8 +1205,29 @@ function applyRemoteRow(val){
   // via applyLoadedJson; el usuario puede guardar manualmente si quiere
   // subir algo adicional desde este PC.
 }
+/* Monitor de conexión con Firebase: cuando la internet se cae y vuelve,
+   sube inmediatamente cualquier cambio pendiente y actualiza el semáforo. */
+let connMonitorStarted = false;
+function startConnectionMonitor(){
+  if(connMonitorStarted) return;
+  connMonitorStarted = true;
+  fbDb.ref('.info/connected').on('value', snap=>{
+    if(snap.val() === true){
+      if(pendingCloudJson !== null){
+        clearTimeout(cloudRetryTimer);
+        cloudRetryCount = 0;
+        doCloudPush(); // reconectado: subir lo pendiente ya mismo
+      } else if(!initialSyncPending){
+        setSyncStatus(true);
+      }
+    } else if(!initialSyncPending){
+      setSyncStatus(false, "Sin internet (guardado local)");
+    }
+  });
+}
 function startCloudSync(){
   if(fbRef) return;
+  startConnectionMonitor();
   const ref = fbDb.ref('studio_data/' + fbUser.uid);
   fbRef = ref;
   let firstFire = true;
@@ -1636,7 +1677,7 @@ function renderView(v){
     inventarios:    [renderInvStockFilters, renderInvStock],
     inventario:     [renderInventory],
     reportes:       [renderReportes],
-    exportar:       [],
+    exportar:       [renderDataSize],
     cierre:         [renderCierre],
     admin:          adminUnlocked ? [renderAdminProducts] : [],
   };
@@ -4194,6 +4235,42 @@ function downloadFile(content, filename, type){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
   URL.revokeObjectURL(url);
+}
+
+/* ================= ESTADO DE LOS DATOS (peso) ================= */
+function renderDataSize(){
+  const el = document.getElementById('dataSizeInfo');
+  if(!el) return;
+  try{
+    const json = JSON.stringify(buildSavePayload());
+    const totalKB = json.length / 1024;
+    // Peso de las imágenes: comprobantes de todas las facturas + logo
+    let imgChars = 0, proofCount = 0;
+    state.sales.forEach(s=>{ (s.proofs||[]).forEach(p=>{ imgChars += (p||'').length; proofCount++; }); });
+    if(LOGO) imgChars += LOGO.length;
+    const imgKB = imgChars / 1024;
+    const pct = totalKB > 0 ? Math.round(imgKB/totalKB*100) : 0;
+    const fmt = kb => kb >= 1024 ? (kb/1024).toFixed(1)+' MB' : Math.round(kb)+' KB';
+    // Referencia de capacidad práctica: ~10 MB comprimido en el navegador.
+    // Comprimido ocupa aprox. 1/3, así que el techo real ronda ~30 MB de JSON.
+    const usoPct = Math.min(100, Math.round(totalKB/(30*1024)*100));
+    const color = usoPct < 50 ? 'var(--green)' : usoPct < 80 ? 'var(--yellow)' : 'var(--red)';
+    el.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div>📦 Peso total de los datos: <b>${fmt(totalKB)}</b></div>
+        <div>🖼️ Imágenes (${proofCount} comprobante${proofCount===1?'':'s'} + logo): <b>${fmt(imgKB)}</b> — ${pct}% del total</div>
+        <div>🧾 Facturas: <b>${state.sales.length}</b> · Clientes: <b>${state.clients.length}</b> · Cierres: <b>${state.cashClosures.length}</b> · Cotizaciones: <b>${state.quotes.length}</b></div>
+        <div style="margin-top:4px;">Capacidad usada: <b style="color:${color}">${usoPct}%</b>
+          <div style="background:var(--panel-2);border-radius:6px;height:8px;margin-top:4px;max-width:340px;overflow:hidden;">
+            <div style="background:${color};height:100%;width:${Math.max(usoPct,2)}%;border-radius:6px;"></div>
+          </div>
+        </div>
+        ${usoPct>=80?'<div style="color:var(--red);font-size:12px;">⚠️ Es momento de mover los comprobantes a almacenamiento aparte. Avísale a Claude.</div>':usoPct>=50?'<div style="color:var(--yellow);font-size:12px;">Los datos van creciendo — nada urgente, pero coméntale a Claude en la próxima mejora.</div>':'<div style="font-size:12px;">Hay espacio de sobra. Todo en orden.</div>'}
+      </div>`;
+  }catch(e){
+    el.textContent = 'No se pudo calcular el tamaño.';
+    console.warn(e);
+  }
 }
 
 /* ================= RESPALDO COMPLETO (.json) ================= */
