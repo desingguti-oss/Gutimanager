@@ -309,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.23</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.24</div>
   </div>
 </div>
 
@@ -340,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.23</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.24</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -1051,10 +1051,13 @@ function mergeClients(existingArr, incomingArr){
     const k = keyOf(c);
     const prev = map.get(k);
     if(!prev){ map.set(k, Object.assign({}, c, {purchases: Array.isArray(c.purchases)?c.purchases.slice():[]})); return; }
-    const purchaseMap = new Map();
-    (prev.purchases||[]).forEach(p=>{ purchaseMap.set(String(p.invoiceId!==undefined?p.invoiceId:JSON.stringify(p)), p); });
-    (c.purchases||[]).forEach(p=>{ purchaseMap.set(String(p.invoiceId!==undefined?p.invoiceId:JSON.stringify(p)), p); });
-    const mergedPurchases = Array.from(purchaseMap.values());
+    // dedupePurchases() usa invoiceId (o total+items si no hay invoiceId) como
+    // identidad real de la compra, en vez de JSON.stringify(p) completo — esa
+    // versión anterior incluía la fecha exacta, que cambiaba en cada fusión y
+    // por eso nunca coincidía, dejando que las compras se acumularan sin
+    // límite en cada sincronización (así fue como una sola factura terminó
+    // copiada 428.287 veces en el historial de una clienta).
+    const mergedPurchases = dedupePurchases((prev.purchases||[]).concat(c.purchases||[]));
     const totalSpent = mergedPurchases.reduce((sum,p)=> sum + (Number(p.total)||0), 0);
     map.set(k, Object.assign({}, prev, c, { purchases: mergedPurchases, totalSpent: totalSpent }));
   });
@@ -1147,9 +1150,28 @@ function applyLoadedJson(raw, opts){
     PRODUCTS.forEach(normalizeProduct);
   }catch(e){ console.warn("No se pudo aplicar lo cargado:", e); }
 }
+let oversizedCloudWarned = false;
 async function doCloudPush(){
   if(!fbUser || applyingRemote || pendingCloudJson===null) return;
   const toSend = pendingCloudJson;
+  // Red de seguridad: si por algún error futuro los datos vuelven a inflarse
+  // muchísimo (como pasó con las 428.287 compras duplicadas de una clienta,
+  // que llevaron el paquete a 68.6MB), Firebase rechaza el guardado con
+  // "Write too large" y antes el sistema reintentaba sin parar cada pocos
+  // segundos para siempre — eso fue lo que puso lenta la app y llegó a
+  // agotar la memoria del navegador. Ahora, si el paquete es sospechosamente
+  // grande, se avisa una sola vez en vez de reintentar en bucle infinito.
+  const SAFE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB: bien por debajo de donde Firebase empezó a fallar (68.6MB)
+  if(toSend.length > SAFE_SIZE_BYTES){
+    pendingCloudJson = null;
+    setSyncStatus(false, "Datos demasiado grandes para la nube");
+    if(!oversizedCloudWarned){
+      oversizedCloudWarned = true;
+      console.error('⚠️ El paquete a subir pesa '+(toSend.length/1048576).toFixed(1)+'MB, muy por encima de lo normal. No se reintentará automáticamente para evitar que la app se ponga lenta. Revisa "Estado de los datos" y avísale a Claude.');
+      toast('⚠️ Tus datos pesan demasiado para subir a la nube ('+(toSend.length/1048576).toFixed(1)+'MB). La app no se pondrá lenta reintentando sola, pero avísale a Claude para revisar qué está pesando tanto.');
+    }
+    return;
+  }
   pendingCloudJson = null;
   try {
     // Firebase Realtime Database: set() reemplaza el nodo completo atómicamente.
@@ -1552,6 +1574,28 @@ function migrateSales(){
    mezclas entre dispositivos. Un solo registro con un campo faltante
    (ej. un cliente sin nombre) hacía explotar pantallas completas.
    Esta función se ejecuta en cada carga y deja los datos consistentes. */
+// Quita compras duplicadas del historial de un cliente. Antes de este fix,
+// una compra podía terminar copiada miles (o cientos de miles) de veces por
+// culpa de fusiones repetidas (mismo nombre de cliente, o sincronizaciones
+// entre PCs) que unían las listas de compras con concat() sin revisar si ya
+// existían — así fue como "LIDIA NEIRA" terminó con 428.287 copias de su
+// única factura real. Si la compra tiene invoiceId, ese es su identidad real
+// (una factura = una compra, sin importar cuántas veces se repita el dato).
+// Si no tiene invoiceId, se usa un identificador basado en su contenido
+// (total + items), ignorando la fecha exacta, que antes cambiaba en cada
+// fusión y por eso nunca coincidía.
+function dedupePurchases(purchases){
+  if(!Array.isArray(purchases)) return [];
+  const map = new Map();
+  purchases.forEach(p=>{
+    if(!p || typeof p!=='object') return;
+    const k = (p.invoiceId!==undefined && p.invoiceId!==null && p.invoiceId!=='')
+      ? ('id:'+String(p.invoiceId))
+      : ('anon:'+JSON.stringify({total:p.total, items:p.items}));
+    if(!map.has(k)) map.set(k, p);
+  });
+  return Array.from(map.values());
+}
 function sanitizeState(){
   const repairs = [];
   // Ventas
@@ -1579,7 +1623,15 @@ function sanitizeState(){
       if(!Array.isArray(p.items)) p.items = [];
       if(typeof p.total !== 'number' || isNaN(p.total)) p.total = 0;
     });
-    if(typeof c.totalSpent !== 'number' || isNaN(c.totalSpent)){
+    // Fix de duplicados: si una compra quedó repetida (a veces cientos de
+    // miles de veces) por fusiones anteriores, aquí se colapsa a una sola.
+    const beforeCount = c.purchases.length;
+    c.purchases = dedupePurchases(c.purchases);
+    const wasDeduped = c.purchases.length !== beforeCount;
+    if(wasDeduped){
+      repairs.push('compras duplicadas de '+c.name+' ('+beforeCount+' -> '+c.purchases.length+')');
+    }
+    if(wasDeduped || typeof c.totalSpent !== 'number' || isNaN(c.totalSpent)){
       c.totalSpent = c.purchases.reduce((a,p)=>a+(p.total||0),0);
       repairs.push('total de '+c.name);
     }
@@ -1592,8 +1644,8 @@ function sanitizeState(){
     const prev = seenNames.get(k);
     if(!prev){ seenNames.set(k, c); uniqueClients.push(c); }
     else {
-      prev.purchases = prev.purchases.concat(c.purchases);
-      prev.totalSpent += c.totalSpent;
+      prev.purchases = dedupePurchases(prev.purchases.concat(c.purchases));
+      prev.totalSpent = prev.purchases.reduce((a,p)=>a+(p.total||0),0);
       if(!prev.phone && c.phone) prev.phone = c.phone;
       if(!prev.doc && c.doc) prev.doc = c.doc;
       repairs.push('cliente duplicado: '+c.name);
