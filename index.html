@@ -309,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.22</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.23</div>
   </div>
 </div>
 
@@ -340,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.22</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.23</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -1439,16 +1439,17 @@ function getDayPayments(dateObj){
   return out;
 }
 
-/* ================= PERSISTENCIA (IndexedDB) =================
-   Antes la copia local vivía en localStorage, que casi todos los navegadores
-   limitan a un cupo fijo y muy chico por sitio (5-10 MB) — ese techo lo
-   impone el navegador, no Firebase, y no se puede ampliar. IndexedDB es
-   OTRO almacén dentro del mismo navegador, con cupo de cientos de MB o más
-   (ligado al espacio en disco disponible), así que usamos IndexedDB para
-   la copia local y dejamos de depender de ese límite tan pequeño.
+/* ================= PERSISTENCIA (localStorage) =================
+   La copia local vive en localStorage: es síncrono e instantáneo, y por eso
+   se restauró este motor tras detectar que una versión anterior, que
+   guardaba en IndexedDB en su lugar, volvía lenta toda la aplicación.
    El respaldo manual (botón "Descargar respaldo .json") NO se ve afectado
    por este cambio: siempre se genera desde los datos vivos en memoria
-   (buildSavePayload()), nunca desde aquí — ver exportBackup(). */
+   (buildSavePayload()), nunca desde aquí — ver exportBackup().
+   Nota: si esta PC llegó a usar esa versión anterior (v2026.07.22) y por
+   eso localStorage quedó vacío (los datos habían quedado solo en
+   IndexedDB), recoverFromIndexedDBOnce() los rescata una sola vez para que
+   nadie pierda información al volver a este motor. */
 const IDB_NAME = 'studio_manager_db';
 const IDB_STORE = 'kv';
 let idbOpenPromise = null;
@@ -1471,29 +1472,18 @@ function idbGet(key){
     req.onerror = ()=>reject(req.error);
   }));
 }
-function idbSet(key, value){
-  return idbOpen().then(db=>new Promise((resolve, reject)=>{
-    const tx = db.transaction(IDB_STORE, 'readwrite');
-    tx.objectStore(IDB_STORE).put(value, key);
-    tx.oncomplete = ()=>resolve();
-    tx.onerror = ()=>reject(tx.error);
-  }));
-}
-/* Migración única: si esta PC todavía tiene la copia vieja en localStorage
-   (de antes de este cambio) y aún no se copió a IndexedDB, se copia una
-   sola vez y se limpia localStorage para liberar ese espacio tan limitado.
-   Si ambos PCs ya migraron, esto no hace nada en cargas siguientes. */
-async function migrateLocalStorageToIDB(){
+/* Rescate único: solo se usa si localStorage está vacío al cargar (ver
+   loadState). Si esta PC alguna vez tuvo datos guardados en IndexedDB (por
+   haber usado la versión anterior) los copia de vuelta a localStorage. Si
+   nunca hubo nada en IndexedDB, no hace nada. */
+async function recoverFromIndexedDBOnce(){
   try{
-    const already = await idbGet(SAVE_KEY);
-    if(already !== undefined) return; // esta PC ya migró antes
-    const old = localStorage.getItem(SAVE_KEY);
-    if(old){
-      await idbSet(SAVE_KEY, old);
-      localStorage.removeItem(SAVE_KEY);
-      console.log('✅ Datos locales migrados de localStorage a IndexedDB');
+    const fromIdb = await idbGet(SAVE_KEY);
+    if(fromIdb){
+      localStorage.setItem(SAVE_KEY, fromIdb);
+      console.log('✅ Datos recuperados de IndexedDB (versión anterior) hacia localStorage');
     }
-  }catch(e){ console.warn('No se pudo migrar localStorage a IndexedDB:', e); }
+  }catch(e){ console.warn('No se pudo revisar IndexedDB en busca de datos previos:', e); }
 }
 const SAVE_KEY = "studio_manager_data_v1";
 let lastSaveErrorToastAt = 0;
@@ -1513,14 +1503,16 @@ function flushLocalSave(){
   const j = pendingLocalJson;
   pendingLocalJson = null;
   clearTimeout(localSaveTimer); localSaveTimer = null;
-  idbSet(SAVE_KEY, LZString.compressToUTF16(j)).catch(e=>{
+  try{
+    localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(j));
+  }catch(e){
     console.warn("No se pudo guardar localmente:", e);
     const now = Date.now();
     if(now - lastSaveErrorToastAt > 8000){
       lastSaveErrorToastAt = now;
-      toast('⚠️ El guardado local falló, pero los datos se están subiendo a la nube. Descarga un respaldo por seguridad.');
+      toast('⚠️ El guardado local falló (posiblemente sin espacio), pero los datos se están subiendo a la nube. Descarga un respaldo por seguridad.');
     }
-  });
+  }
 }
 function saveState(){
   let json = null;
@@ -1685,9 +1677,11 @@ function backfillPurchaseInvoiceIds(){
   });
 }
 async function loadState(){
-  await migrateLocalStorageToIDB();
-  let raw = null;
-  try{ raw = await idbGet(SAVE_KEY); }catch(e){ console.warn('No se pudo leer la copia local (IndexedDB):', e); }
+  let raw = localStorage.getItem(SAVE_KEY);
+  if(!raw){
+    await recoverFromIndexedDBOnce();
+    raw = localStorage.getItem(SAVE_KEY);
+  }
   if(!raw) return;
   // Intenta descomprimir (formato nuevo con LZ-String).
   // Si el dato estaba sin comprimir (versión anterior), decompressFromUTF16
@@ -4390,26 +4384,24 @@ function renderDataSize(){
     const imgKB = imgChars / 1024;
     const pct = totalKB > 0 ? Math.round(imgKB/totalKB*100) : 0;
     const fmt = kb => kb >= 1024 ? (kb/1024).toFixed(1)+' MB' : Math.round(kb)+' KB';
-    // Desde que la copia local vive en IndexedDB (no en localStorage), el
-    // límite chico del navegador (5-10 MB) ya no aplica — IndexedDB aguanta
-    // cientos de MB sin problema. Lo que sigue importando es el PESO de lo
-    // que viaja en cada guardado/sincronización con la nube: entre más pesa,
-    // más tarda cada guardado. Por eso esta barra ahora mide "qué tan pesada
-    // está la sincronización", no "te vas a quedar sin espacio".
-    const usoPct = Math.min(100, Math.round(totalKB/(60*1024)*100));
+    // La copia local vive en localStorage, que el navegador limita a un
+    // cupo fijo y chico por sitio (unos 5-10 MB según el navegador). Por
+    // eso esta barra mide qué tan cerca está ese cupo de llenarse: entre
+    // más cerca del límite, más riesgo de que el guardado local falle.
+    const usoPct = Math.min(100, Math.round(totalKB/(30*1024)*100));
     const color = usoPct < 50 ? 'var(--green)' : usoPct < 80 ? 'var(--yellow)' : 'var(--red)';
     el.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:6px;">
-        <div>📦 Peso total de los datos sincronizados: <b>${fmt(totalKB)}</b></div>
+        <div>📦 Peso total de los datos: <b>${fmt(totalKB)}</b></div>
         <div>🖼️ Comprobantes (${proofCount}): <b>${migratedCount}</b> en almacenamiento en la nube (no ocupan espacio aquí) · <b>${embeddedCount}</b> todavía embebido${embeddedCount===1?'':'s'} (<b>${fmt(imgKB)}</b>, ${pct}% del total)</div>
         <div>🧾 Facturas: <b>${state.sales.length}</b> · Clientes: <b>${state.clients.length}</b> · Cierres: <b>${state.cashClosures.length}</b> · Cotizaciones: <b>${state.quotes.length}</b></div>
-        <div style="margin-top:4px;">Peso de la sincronización: <b style="color:${color}">${usoPct}%</b>
+        <div style="margin-top:4px;">Capacidad usada: <b style="color:${color}">${usoPct}%</b>
           <div style="background:var(--panel-2);border-radius:6px;height:8px;margin-top:4px;max-width:340px;overflow:hidden;">
             <div style="background:${color};height:100%;width:${Math.max(usoPct,2)}%;border-radius:6px;"></div>
           </div>
         </div>
-        ${embeddedCount>0?`<div style="color:var(--yellow);font-size:12px;">📎 Hay ${embeddedCount} comprobante(s) sin migrar. Usa el botón "☁️ Mover comprobantes a la nube" para aligerar la sincronización ahora mismo.</div>`:''}
-        ${usoPct>=80?'<div style="color:var(--red);font-size:12px;">⚠️ La sincronización está pesada y eso puede sentirse como demora al guardar. Si ya migraste los comprobantes y sigue en rojo, avísale a Claude para revisar qué más está pesando.</div>':usoPct>=50?'<div style="color:var(--yellow);font-size:12px;">Los datos van creciendo — nada urgente, pero coméntale a Claude en la próxima mejora.</div>':'<div style="font-size:12px;">Todo liviano. Sin problema de espacio ni de velocidad.</div>'}
+        ${embeddedCount>0?`<div style="color:var(--yellow);font-size:12px;">📎 Hay ${embeddedCount} comprobante(s) sin migrar. Usa el botón "☁️ Mover comprobantes a la nube" para liberar espacio local ahora mismo.</div>`:''}
+        ${usoPct>=80?'<div style="color:var(--red);font-size:12px;">⚠️ Cerca del límite de espacio local. Migra los comprobantes pendientes a la nube; si ya no hay ninguno y sigue en rojo, avísale a Claude.</div>':usoPct>=50?'<div style="color:var(--yellow);font-size:12px;">Los datos van creciendo — nada urgente, pero coméntale a Claude en la próxima mejora.</div>':'<div style="font-size:12px;">Todo liviano. Sin problema de espacio ni de velocidad.</div>'}
       </div>`;
   }catch(e){
     el.textContent = 'No se pudo calcular el tamaño.';
@@ -4435,13 +4427,13 @@ document.getElementById('restoreBackupInput')?.addEventListener('change', e=>{
   const file = e.target.files[0];
   if(!file) return;
   const reader = new FileReader();
-  reader.onload = async ()=>{
+  reader.onload = ()=>{
     try{
       const parsed = JSON.parse(reader.result);
       if(!parsed || !parsed.state){ toast('El archivo no tiene el formato esperado'); return; }
       const ok = confirm('Esto reemplazará TODA la información actual (ventas, facturas, clientes, inventario) con la del archivo de respaldo. ¿Deseas continuar?');
       if(!ok) return;
-      await idbSet(SAVE_KEY, LZString.compressToUTF16(reader.result));
+      localStorage.setItem(SAVE_KEY, LZString.compressToUTF16(reader.result));
       // Marca que este respaldo fue restaurado a propósito por la persona, así que
       // al recargar debe subirse a la nube tal cual está (sin esperar a comparar
       // primero con lo que haya en la nube) — de lo contrario la nube lo
