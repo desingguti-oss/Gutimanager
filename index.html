@@ -309,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.24</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.25</div>
   </div>
 </div>
 
@@ -340,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.24</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.25</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -630,7 +630,15 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           <button class="btn btn-ghost" id="btnCotejoBuscar" style="padding:10px 14px;">Buscar</button>
         </div>
         <div class="sticky-table-wrap scroll-thin" style="max-height:400px;">
-          <table><thead><tr><th>Fecha</th><th>Factura</th><th>Cliente</th><th>Monto</th><th>Medio de pago</th><th>Verificado</th></tr></thead><tbody id="cotejoBody"></tbody></table>
+          <table><thead><tr>
+            <th class="sort-th" onclick="sortCotejo('fecha')" id="thCotFecha">Fecha ↓</th>
+            <th class="sort-th" onclick="sortCotejo('factura')" id="thCotFactura">Factura ↕</th>
+            <th class="sort-th" onclick="sortCotejo('cliente')" id="thCotCliente">Cliente ↕</th>
+            <th class="sort-th" onclick="sortCotejo('monto')" id="thCotMonto">Monto ↕</th>
+            <th class="sort-th" onclick="sortCotejo('medio')" id="thCotMedio">Medio de pago ↕</th>
+            <th>Verificado</th>
+            <th></th>
+          </tr></thead><tbody id="cotejoBody"></tbody></table>
         </div>
       </div>
       <div class="card mt16">
@@ -923,6 +931,7 @@ function adjustFont(dir){
 let facturasSort  = {col:'fecha', asc:false};
 let carteraSort   = {col:'fecha', asc:false};
 let clientesSort  = {col:'total', asc:false};
+let cotejoSort    = {col:'fecha', asc:false};
 
 /* ── CIERRE DATE OVERRIDE ── */
 let cierreDateOverride = null;
@@ -3473,11 +3482,24 @@ function setCotejoStatus(sid, pidx, nuevoEstado){
     toast(labels[nuevoEstado] || 'Estado actualizado');
   }
 }
+function sortCotejo(col){
+  if(cotejoSort.col===col) cotejoSort.asc=!cotejoSort.asc;
+  else { cotejoSort.col=col; cotejoSort.asc=false; }
+  const labels = {fecha:'Fecha', factura:'Factura', cliente:'Cliente', monto:'Monto', medio:'Medio de pago'};
+  Object.keys(labels).forEach(c=>{
+    const el = document.getElementById('thCot'+c.charAt(0).toUpperCase()+c.slice(1));
+    if(el) el.textContent = labels[c] + (cotejoSort.col===c ? (cotejoSort.asc?' ↑':' ↓') : ' ↕');
+  });
+  renderCotejoBanco();
+}
 function renderCotejoBanco(){
   const desdeStr = document.getElementById('cotejofechaDesde')?.value || '';
   const hastaStr = document.getElementById('cotejofechaHasta')?.value || '';
   let payments = [];
 
+  // NOTA: esto solo LEE state.sales para armar la tabla — nunca borra ni
+  // modifica facturas. Los pagos quedan guardados para siempre en cada
+  // factura; ordenar o filtrar aquí no afecta esos datos en lo absoluto.
   state.sales.forEach(s=>{
     if(s.status==='Anulada') return;
     (s.payments||[]).forEach((p, idx)=>{
@@ -3491,10 +3513,23 @@ function renderCotejoBanco(){
     });
   });
 
+  // Orden: se puede hacer clic en cualquier título de columna (Fecha, Factura,
+  // Cliente, Monto, Medio de pago) para ordenar por ese campo; un segundo
+  // clic invierte el orden (ascendente/descendente).
+  payments.sort((a,b)=>{
+    let va, vb;
+    if(cotejoSort.col==='factura'){ va=a.saleId; vb=b.saleId; }
+    else if(cotejoSort.col==='cliente'){ va=a.client.toLowerCase(); vb=b.client.toLowerCase(); return cotejoSort.asc?(va<vb?-1:1):(vb<va?-1:1); }
+    else if(cotejoSort.col==='monto'){ va=a.p.amount; vb=b.p.amount; }
+    else if(cotejoSort.col==='medio'){ va=a.p.method.toLowerCase(); vb=b.p.method.toLowerCase(); return cotejoSort.asc?(va<vb?-1:1):(vb<va?-1:1); }
+    else { va=new Date(a.p.date).getTime(); vb=new Date(b.p.date).getTime(); }
+    return cotejoSort.asc ? va-vb : vb-va;
+  });
+
   const cotejoBody = document.getElementById('cotejoBody');
   if(!cotejoBody) return;
   if(payments.length===0){
-    cotejoBody.innerHTML = `<tr><td colspan="6" class="text-dim">Sin pagos digitales en este período</td></tr>`;
+    cotejoBody.innerHTML = `<tr><td colspan="7" class="text-dim">Sin pagos digitales en este período</td></tr>`;
   } else {
     cotejoBody.innerHTML = payments.map(({p,idx,saleId,client})=>`
       <tr>
@@ -3511,6 +3546,7 @@ function renderCotejoBanco(){
           else if(st==='problema'){bg='#fee2e2';col='#991b1b';txt='✗ Problema';}
           return `<button class="cotejo-status-btn" data-sale="${saleId}" data-idx="${idx}" style="background:${bg};color:${col};border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;font-weight:600;white-space:nowrap;">${txt}</button>`;
         })()}</td>
+        <td style="text-align:center;"><button class="btn btn-ghost btn-sm" onclick="viewInvoice(${saleId})" title="Ver factura y comprobante(s) adjuntos">📄 Ver factura</button></td>
       </tr>`).join('');
     cotejoBody.querySelectorAll('.cotejo-status-btn').forEach(btn=>{
       btn.addEventListener('click', e=>{
