@@ -309,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.25</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.26</div>
   </div>
 </div>
 
@@ -340,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.25</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.26</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -788,7 +788,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           <p class="text-dim" style="font-size:11.5px;margin:8px 0 0;">Agot. = agotado · Stock = controlar existencias · Tallas = manejar por talla · Tipo = A adulto / N niño · Cotizar = precio manual al vender</p>
           <div class="sticky-table-wrap scroll-thin" style="max-height:520px;">
             <div class="admin-row head mt8">
-              <div>EAN</div><div>Nombre</div><div>Categoría</div><div>Detal</div><div>Mayor</div><div>Agot.</div><div>Stock</div><div>Tallas</div><div>Tipo</div><div>Cotizar</div><div></div>
+              <div class="sort-th" onclick="sortAdminProd('ean')" id="thAdmEan">EAN ↕</div><div class="sort-th" onclick="sortAdminProd('nombre')" id="thAdmNombre">Nombre ↕</div><div class="sort-th" onclick="sortAdminProd('categoria')" id="thAdmCategoria">Categoría ↕</div><div class="sort-th" onclick="sortAdminProd('detal')" id="thAdmDetal">Detal ↕</div><div class="sort-th" onclick="sortAdminProd('mayor')" id="thAdmMayor">Mayor ↕</div><div>Agot.</div><div>Stock</div><div>Tallas</div><div>Tipo</div><div>Cotizar</div><div></div>
             </div>
             <div id="adminProductList"></div>
           </div>
@@ -932,6 +932,7 @@ let facturasSort  = {col:'fecha', asc:false};
 let carteraSort   = {col:'fecha', asc:false};
 let clientesSort  = {col:'total', asc:false};
 let cotejoSort    = {col:'fecha', asc:false};
+let adminSort     = {col:null, asc:true}; // null = orden original (nuevos productos arriba)
 
 /* ── CIERRE DATE OVERRIDE ── */
 let cierreDateOverride = null;
@@ -3899,9 +3900,44 @@ document.getElementById('btnAddProduct').addEventListener('click', ()=>{
   toast("Producto agregado. Edítalo en la tabla.");
 });
 
+// Ordena la tabla de Gestión de productos al hacer clic en un título de columna.
+// Primer clic en una columna: orden ascendente (A→Z o de menor a mayor);
+// segundo clic en la misma columna: invierte el orden. Solo cambia cómo se
+// MUESTRA la lista — nunca modifica ni reordena los productos guardados.
+function sortAdminProd(col){
+  if(adminSort.col===col) adminSort.asc=!adminSort.asc;
+  else { adminSort.col=col; adminSort.asc=true; }
+  const labels = {ean:'EAN', nombre:'Nombre', categoria:'Categoría', detal:'Detal', mayor:'Mayor'};
+  Object.keys(labels).forEach(c=>{
+    const el = document.getElementById('thAdm'+c.charAt(0).toUpperCase()+c.slice(1));
+    if(el) el.textContent = labels[c] + (adminSort.col===c ? (adminSort.asc?' ↑':' ↓') : ' ↕');
+  });
+  renderAdminProducts();
+}
 function renderAdminProducts(){
   const q = document.getElementById('adminSearch').value.toLowerCase().trim();
   const list = PRODUCTS.filter(p=>p.nombre.toLowerCase().includes(q) || String(p.ean).includes(q));
+  if(adminSort.col){
+    const col = adminSort.col, asc = adminSort.asc;
+    list.sort((a,b)=>{
+      if(col==='ean'){
+        // EAN: orden numérico. Si alguno no es número válido, se compara como texto.
+        const na = Number(a.ean), nb = Number(b.ean);
+        if(isNaN(na) || isNaN(nb)){
+          const sa = String(a.ean), sb = String(b.ean);
+          return asc ? sa.localeCompare(sb) : sb.localeCompare(sa);
+        }
+        return asc ? na-nb : nb-na;
+      }
+      if(col==='detal' || col==='mayor'){
+        const na = Number(a[col])||0, nb = Number(b[col])||0;
+        return asc ? na-nb : nb-na;
+      }
+      // Nombre y Categoría: orden alfabético (sin distinguir mayúsculas/acentos).
+      const sa = String(a[col]||'').toLowerCase(), sb = String(b[col]||'').toLowerCase();
+      return asc ? sa.localeCompare(sb,'es') : sb.localeCompare(sa,'es');
+    });
+  }
   document.getElementById('adminProdCount').textContent = list.length + " productos";
   const wrap = document.getElementById('adminProductList');
   wrap.innerHTML = list.map(p=>{
