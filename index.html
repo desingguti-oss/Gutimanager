@@ -309,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.26</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.27</div>
   </div>
 </div>
 
@@ -340,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.26</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.27</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -573,7 +573,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
         <div class="section-title">Control de inventario <span class="hint" id="invStockCount"></span></div>
         <p class="text-dim" style="font-size:12px;margin:-6px 0 12px;">Activa el control de stock por producto en Administración. Las unidades se descuentan solas con cada venta.</p>
         <div class="inv-row head">
-          <div>Producto</div><div>Existencias</div><div>Estado</div><div>Agregar entrada</div>
+          <div class="sort-th" onclick="sortInvStock('producto')" id="thInvStockProducto">Producto ↕</div><div class="sort-th" onclick="sortInvStock('exist')" id="thInvStockExist">Existencias ↕</div><div class="sort-th" onclick="sortInvStock('estado')" id="thInvStockEstado">Estado ↕</div><div>Agregar entrada</div>
         </div>
         <div id="invStockList" class="scroll-thin" style="max-height:560px;overflow-y:auto;"></div>
       </div>
@@ -609,9 +609,12 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
       <div class="card mt16">
         <div class="flex-between" style="margin-bottom:10px;">
           <div class="section-title mb0">Historial de cierres <span class="hint" id="cierreHistCount"></span></div>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <input class="input" id="cierreHistFecha" type="date" oninput="renderReportes()" style="max-width:160px;padding:6px 10px;" title="Filtrar por fecha">
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cierreHistFecha').value='';renderReportes();" title="Limpiar filtro">✕</button>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span class="text-dim" style="font-size:11.5px;">Desde</span>
+            <input class="input" id="cierreHistDesde" type="date" oninput="renderReportes()" style="max-width:150px;padding:6px 10px;" title="Filtrar desde esta fecha">
+            <span class="text-dim" style="font-size:11.5px;">Hasta</span>
+            <input class="input" id="cierreHistHasta" type="date" oninput="renderReportes()" style="max-width:150px;padding:6px 10px;" title="Filtrar hasta esta fecha">
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cierreHistDesde').value='';document.getElementById('cierreHistHasta').value='';renderReportes();" title="Limpiar filtro">✕</button>
           </div>
         </div>
         <div class="sticky-table-wrap scroll-thin" style="max-height:360px;">
@@ -933,6 +936,7 @@ let carteraSort   = {col:'fecha', asc:false};
 let clientesSort  = {col:'total', asc:false};
 let cotejoSort    = {col:'fecha', asc:false};
 let adminSort     = {col:null, asc:true}; // null = orden original (nuevos productos arriba)
+let invStockSort  = {col:null, asc:true}; // null = orden original
 
 /* ── CIERRE DATE OVERRIDE ── */
 let cierreDateOverride = null;
@@ -1389,7 +1393,6 @@ let STUDIO = { name:"Estudio Fotográfico", nit:"NIT 000.000.000-0", addr:"Tu di
 let LOGO = null; // base64 image
 let ADMIN_PASS = "admin123";
 let adminUnlocked = false;
-let invStockUnlocked = false;
 
 let state = {
   sales: [],
@@ -3025,7 +3028,8 @@ function stockPill(p){
   return `<span class="stock-pill stock-ok">${tot} und</span>`;
 }
 function requireStockPassword(onSuccess){
-  if(invStockUnlocked){ onSuccess(); return; }
+  // Contraseña para modificar existencias: si es correcta, se aplica el
+  // cambio y la ventana se CIERRA sola. Se pide en cada modificación.
   document.getElementById('modalTitle').textContent = 'Verificación requerida';
   document.getElementById('modalBody').innerHTML = `
     <p class="text-dim" style="font-size:12.5px;">Ingresa la contraseña para modificar las existencias del inventario.</p>
@@ -3035,9 +3039,28 @@ function requireStockPassword(onSuccess){
   document.getElementById('modalDetail').classList.add('show');
   document.getElementById('btnStockPassOk').addEventListener('click', ()=>{
     const val = document.getElementById('stockPassInput').value;
-    if(val==='Thomas'){ invStockUnlocked = true; closeModal(); onSuccess(); }
+    if(val==='Thomas'){ closeModal(); onSuccess(); }
     else { document.getElementById('stockPassErr').textContent = 'Contraseña incorrecta'; }
   });
+  // Enter en el campo de contraseña = Confirmar
+  document.getElementById('stockPassInput').addEventListener('keydown', e=>{
+    if(e.key==='Enter') document.getElementById('btnStockPassOk').click();
+  });
+  setTimeout(()=>document.getElementById('stockPassInput')?.focus(), 50);
+}
+// Ordena la tabla de Inventarios al hacer clic en un título de columna.
+// Primer clic: ascendente (A→Z / de menor a mayor existencia); segundo clic
+// en el mismo título: invierte el orden. Solo cambia cómo se MUESTRA la
+// lista — nunca modifica las existencias ni el orden guardado de los productos.
+function sortInvStock(col){
+  if(invStockSort.col===col) invStockSort.asc=!invStockSort.asc;
+  else { invStockSort.col=col; invStockSort.asc=true; }
+  const labels = {producto:'Producto', exist:'Existencias', estado:'Estado'};
+  Object.keys(labels).forEach(c=>{
+    const el = document.getElementById('thInvStock'+c.charAt(0).toUpperCase()+c.slice(1));
+    if(el) el.textContent = labels[c] + (invStockSort.col===c ? (invStockSort.asc?' ↑':' ↓') : ' ↕');
+  });
+  renderInvStock();
 }
 function renderInvStock(){
   const cont = document.getElementById('invStockList');
@@ -3046,6 +3069,25 @@ function renderInvStock(){
   const q = document.getElementById('invStockSearch').value.toLowerCase().trim();
   const list = PRODUCTS.filter(p=>p.controlStock && (invStockFilterCat==="TODAS"||p.categoria===invStockFilterCat) &&
     (p.nombre.toLowerCase().includes(q)||String(p.ean).includes(q)));
+  if(invStockSort.col){
+    const col = invStockSort.col, asc = invStockSort.asc;
+    // Estado: agotado (0) < bajo (1) < con stock (2); a igual estado, por cantidad.
+    const rank = p=>{ const t=prodStockTotal(p); if(t<=0) return 0; if(t<=(p.stockMin||3)) return 1; return 2; };
+    list.sort((a,b)=>{
+      if(col==='producto'){
+        const sa=String(a.nombre).toLowerCase(), sb=String(b.nombre).toLowerCase();
+        return asc ? sa.localeCompare(sb,'es') : sb.localeCompare(sa,'es');
+      }
+      if(col==='exist'){
+        const na=prodStockTotal(a), nb=prodStockTotal(b);
+        return asc ? na-nb : nb-na;
+      }
+      const ra=rank(a), rb=rank(b);
+      if(ra!==rb) return asc ? ra-rb : rb-ra;
+      const na=prodStockTotal(a), nb=prodStockTotal(b);
+      return asc ? na-nb : nb-na;
+    });
+  }
   document.getElementById('invStockCount').textContent = list.length + " con control";
 
   // KPIs
@@ -3103,13 +3145,13 @@ function renderInvStock(){
   cont.querySelectorAll('.inv-stock-input:not(.inv-add-input)').forEach(inp=>{
     inp.addEventListener('change', e=>{
       const idx = parseInt(e.target.dataset.idx), val = Math.max(0, parseInt(e.target.value)||0);
-      requireAnularPassword(()=>{ PRODUCTS[idx].stock = val; saveState(); renderInvStock(); renderProductGrid(); });
+      requireStockPassword(()=>{ PRODUCTS[idx].stock = val; saveState(); renderInvStock(); renderProductGrid(); toast('Existencias actualizadas'); });
     });
   });
   cont.querySelectorAll('.inv-talla-input').forEach(inp=>{
     inp.addEventListener('change', e=>{
       const idx = parseInt(e.target.dataset.idx), talla = e.target.dataset.talla, val = Math.max(0, parseInt(e.target.value)||0);
-      requireAnularPassword(()=>{ PRODUCTS[idx].tallas[talla] = val; saveState(); renderInvStock(); renderProductGrid(); });
+      requireStockPassword(()=>{ PRODUCTS[idx].tallas[talla] = val; saveState(); renderInvStock(); renderProductGrid(); toast('Existencias actualizadas'); });
     });
   });
 }
@@ -3301,23 +3343,31 @@ function renderReportes(){
   // Histórico de años anteriores (tabla manual editable)
   renderHistorico();
 
-  // Historial de cierres
-  const cierreHistFecha = document.getElementById('cierreHistFecha')?.value || '';
+  // Historial de cierres — filtro por rango de fechas (Desde / Hasta).
+  // Se usa la fecha LOCAL del cierre (no UTC) para que coincida con la fecha
+  // que se muestra en la tabla; el filtro solo oculta filas, nunca borra cierres.
+  const cierreHistDesde = document.getElementById('cierreHistDesde')?.value || '';
+  const cierreHistHasta = document.getElementById('cierreHistHasta')?.value || '';
+  const hayFiltroCierres = !!(cierreHistDesde || cierreHistHasta);
+  const localDayKey = d => { const x=new Date(d); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
   const allClosures = state.cashClosures.map((c,i)=>({c,i}));
-  const filteredClosures = cierreHistFecha
-    ? allClosures.filter(({c})=>new Date(c.date).toISOString().split('T')[0]===cierreHistFecha)
+  const filteredClosures = hayFiltroCierres
+    ? allClosures.filter(({c})=>{
+        const k = localDayKey(c.date);
+        return (!cierreHistDesde || k>=cierreHistDesde) && (!cierreHistHasta || k<=cierreHistHasta);
+      })
     : allClosures;
   document.getElementById('cierreHistCount').textContent =
-    (cierreHistFecha && filteredClosures.length!==allClosures.length
+    (hayFiltroCierres && filteredClosures.length!==allClosures.length
       ? `${filteredClosures.length} de ` : '') + allClosures.length + " cierres";
   document.getElementById('cierreHistBody').innerHTML = filteredClosures.length ? filteredClosures.slice().reverse().map(({c,i})=>`
     <tr><td>${new Date(c.date).toLocaleDateString('es-CO')}<br><span class="text-dim" style="font-size:11px;">${new Date(c.date).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</span></td>
     <td>${c.count}</td><td>${money(c.ventas||0)}</td>
     <td>${money(c.gastosTotal||0)}</td>
-    <td>${money(c.sueldoMethod==='Efectivo'?(c.sueldo||0):0)}</td>
+    <td>${money(c.sueldo||0)}${(c.sueldo>0&&c.sueldoMethod)?`<br><span class="text-dim" style="font-size:10.5px;">${c.sueldoMethod==='Digital'?'digital':'efectivo'}</span>`:''}</td>
     <td><b>${money(c.efectivoGuardar||0)}</b></td>
     <td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="reprintCierre(${i})" title="Imprimir ticket">🖨️</button> <button class="btn btn-ghost btn-sm" onclick="printCierreLetter(${i})" title="Imprimir carta">📄</button> <button class="btn btn-ghost btn-sm" onclick="openEditCierre(${i})" title="Editar">✏️</button></td></tr>`).join('')
-    : `<tr><td colspan="8" class="text-dim">${cierreHistFecha ? 'No hay cierres para esa fecha' : 'No se han realizado cierres'}</td></tr>`;
+    : `<tr><td colspan="8" class="text-dim">${hayFiltroCierres ? 'No hay cierres en ese rango de fechas' : 'No se han realizado cierres'}</td></tr>`;
 }
 
 function repDetPeriodKey(date, agrupar){
@@ -3417,7 +3467,7 @@ function renderReporteDetallado(){
           <td><b>${money(c.ventas||0)}</b></td>
           <td>${money(c.ingresoEfectivo||0)}</td>
           <td>${money(c.gastosTotal||0)}</td>
-          <td>${money(c.sueldoMethod==='Efectivo'?(c.sueldo||0):0)}</td>
+          <td>${money(c.sueldo||0)}${(c.sueldo>0&&c.sueldoMethod)?` <span class="text-dim" style="font-size:10.5px;">(${c.sueldoMethod==='Digital'?'digital':'efectivo'})</span>`:''}</td>
           <td><b style="color:var(--green)">${money(c.efectivoGuardar||0)}</b></td>
         </tr>`).join('')
       : `<tr><td colspan="7" class="text-dim">Sin cierres en este período</td></tr>`;
@@ -4093,10 +4143,10 @@ function renderCierre(){
   document.getElementById('cuadreCaja').innerHTML = `
     <div class="pay-breakdown-row"><span>Ingresos en efectivo</span><b>${money(ingresoEfectivo)}</b></div>
     <div class="pay-breakdown-row neg"><span>− Gastos del día (efectivo)</span><b>- ${money(gTot)}</b></div>
-    <div class="pay-breakdown-row neg"><span>− Sueldo empleado ${sueldoMethod?('('+sueldoMethod+')'):''}</span><b>- ${money(sueldoEfectivo)}</b></div>
+    ${sueldoMethod==='Digital'?'':`<div class="pay-breakdown-row neg"><span>− Sueldo empleado ${sueldoMethod?('('+sueldoMethod+')'):''}</span><b>- ${money(sueldoEfectivo)}</b></div>`}
     <div class="pay-breakdown-row net"><span>Efectivo que debe quedar en caja</span><b>${money(efectivoGuardar)}</b></div>
     <div class="pay-breakdown-row" style="margin-top:10px;"><span>Ingresos digitales (Nequi/Daviplata/BRE-B/QR)</span><b>${money(ingresoDigital)}</b></div>
-    ${sueldoMethod==='Digital'&&sueldoVal>0?`<div class="pay-breakdown-row"><span>Sueldo pagado digital</span><b>${money(sueldoVal)}</b></div>`:''}`;
+    ${sueldoMethod==='Digital'&&sueldoVal>0?`<div class="pay-breakdown-row"><span>Sueldo empleado pagado digital (no sale del efectivo)</span><b>${money(sueldoVal)}</b></div>`:''}`;
 }
 
 function buildClosureSnapshot(allToday){
@@ -4324,13 +4374,13 @@ function printCierreLetter(i){
           <table style="width:100%;border-collapse:collapse;font-size:13px;">
             <tr><td style="padding:7px 10px;border-bottom:1px solid #eee;">Efectivo en caja</td><td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;">${money(snap.ingresoEfectivo)}</td></tr>
             <tr><td style="padding:7px 10px;border-bottom:1px solid #eee;">− Gastos</td><td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;">− ${money(snap.gastosTotal||0)}</td></tr>
-            <tr><td style="padding:7px 10px;border-bottom:1px solid #eee;">− Sueldo ${snap.sueldoMethod==='Efectivo'?'(efectivo)':''}</td><td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;">− ${money(snap.sueldoMethod==='Efectivo'?(snap.sueldo||0):0)}</td></tr>
+            ${snap.sueldoMethod==='Digital'?'':`<tr><td style="padding:7px 10px;border-bottom:1px solid #eee;">− Sueldo ${snap.sueldoMethod==='Efectivo'?'(efectivo)':''}</td><td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;">− ${money(snap.sueldoMethod==='Efectivo'?(snap.sueldo||0):0)}</td></tr>`}
           </table>
           <div style="margin-top:12px;padding:12px;background:#f3f0ff;border-radius:8px;border:2px solid #7c5cff;text-align:center;">
             <div style="font-size:12px;color:#555;margin-bottom:4px;">EFECTIVO A GUARDAR</div>
             <div style="font-size:24px;font-weight:700;color:#7c5cff;">${money(snap.efectivoGuardar)}</div>
           </div>
-          ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="margin-top:8px;font-size:12px;color:#555;">Sueldo pagado digital: ${money(snap.sueldo)}</div>`:''}
+          ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="margin-top:8px;font-size:13px;color:#333;">Sueldo empleado pagado digital: <b>${money(snap.sueldo)}</b> <span style="font-size:11px;color:#777;">(no sale del efectivo)</span></div>`:''}
         </div>
       </div>
       ${(()=>{
@@ -4398,11 +4448,11 @@ function printCierre(snap){
     <div style="font-size:12.5px;">Ingresos en efectivo: <b>${money(snap.ingresoEfectivo)}</b></div>
     <div style="font-size:12.5px;">− Gastos del día: <b>${money(snap.gastosTotal)}</b></div>
     ${snap.gastos.map(g=>`<div style="font-size:11px;color:#555;margin-left:12px;">· ${g.desc}: ${money(g.value)}</div>`).join('')}
-    <div style="font-size:12.5px;">− Sueldo empleado ${snap.sueldoMethod?('('+snap.sueldoMethod+')'):''}: <b>${money(snap.sueldoMethod==='Efectivo'?snap.sueldo:0)}</b></div>
+    ${snap.sueldoMethod==='Digital'?'':`<div style="font-size:12.5px;">− Sueldo empleado ${snap.sueldoMethod?('('+snap.sueldoMethod+')'):''}: <b>${money(snap.sueldoMethod==='Efectivo'?(snap.sueldo||0):0)}</b></div>`}
     <hr>
     <div style="font-size:16px;font-weight:bold;text-align:center;border:2px solid #000;padding:8px;border-radius:6px;">EFECTIVO A GUARDAR<br>${money(snap.efectivoGuardar)}</div>
     <div style="font-size:12px;margin-top:8px;">Ingresos digitales (no en caja): <b>${money(snap.ingresoDigital)}</b></div>
-    ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="font-size:11.5px;color:#555;">Sueldo pagado digital: ${money(snap.sueldo)}</div>`:''}
+    ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="font-size:12.5px;">Sueldo empleado pagado digital: <b>${money(snap.sueldo)}</b> <span style="font-size:10.5px;color:#555;">(no sale del efectivo)</span></div>`:''}
     <hr><div style="text-align:center;font-size:11px;color:#666;">Generado por Studio Manager</div>
   </div>`;
   setTimeout(()=>window.print(), 50);
