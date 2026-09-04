@@ -309,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.31</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.08.01</div>
   </div>
 </div>
 
@@ -340,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.31</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.08.01</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -528,7 +528,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           </div>
           <div id="cotVinOjalesWrap" style="display:none;gap:8px;align-items:center;margin-top:12px;">
             <span class="text-dim" style="font-size:12.5px;">Agregar ojales</span>
-            <div class="toggle-sw" id="cotVinOjales" title="Adicional de ojales arriba y abajo"><div class="dot"></div></div>
+            <div class="toggle-sw" id="cotVinOjales" title="Adicional de 4 ojales (uno por esquina)"><div class="dot"></div></div>
           </div>
           <button class="btn btn-primary mt16" id="btnCotVinCalc">🧮 Calcular</button>
           <div id="cotVinResultado" class="mt16"></div>
@@ -3983,9 +3983,12 @@ function calcVinilo(){
     if(varilla) total += metrosArribaAbajo * varilla.precioMetro;
   }
   const conOjales = ADICIONAL_APLICA.includes(mat.nombre) && document.getElementById('cotVinOjales')?.classList.contains('on');
+  let ojalesSubtotal = 0;
   if(conOjales){
+    // Ojales: se cobran SIEMPRE 4 unidades por banner (uno por esquina).
+    // El precio guardado en Adicionales es el precio POR OJAL.
     const ojales = state.cotAdicionales.find(a=>a.nombre==='Ojales');
-    if(ojales) total += metrosArribaAbajo * ojales.precioMetro;
+    if(ojales){ ojalesSubtotal = 4 * ojales.precioMetro; total += ojalesSubtotal; }
   }
   const extras = [conLaminado?'laminado':null, conVarilla?'varilla':null, conOjales?'ojales':null].filter(Boolean);
   box.innerHTML = `
@@ -3995,7 +3998,7 @@ function calcVinilo(){
       <tr><td>Colores</td><td style="text-align:right;">${colores}</td></tr>
       ${conLaminado?`<tr><td>Incluye laminado</td><td style="text-align:right;">Sí</td></tr>`:''}
       ${conVarilla?`<tr><td>Incluye varilla</td><td style="text-align:right;">Sí</td></tr>`:''}
-      ${conOjales?`<tr><td>Incluye ojales</td><td style="text-align:right;">Sí</td></tr>`:''}
+      ${conOjales?`<tr><td>Incluye ojales (4 und)</td><td style="text-align:right;">${money(ojalesSubtotal)}</td></tr>`:''}
       <tr><td><b>Total</b></td><td style="text-align:right;"><b style="color:var(--green);font-size:15px;">${money(total)}</b></td></tr>
     </table>
     <button class="btn btn-primary mt16" onclick="sendCotizadorToCart('${mat.nombre}${extras.length?(' + '+extras.join(' + ')):''} ${alto}x${ancho}cm', ${total}, 'PUBLICIDAD')">➕ Enviar a venta</button>`;
@@ -4012,11 +4015,11 @@ function openVinilosModal(){
         <td><input class="input" style="padding:6px 8px;font-size:12px;" type="number" step="1" value="${v.menos1}" onchange="updateVinilo(${i},'menos1',this.value)"></td>
         <td><input class="input" style="padding:6px 8px;font-size:12px;" type="number" step="1" value="${v.mas1}" onchange="updateVinilo(${i},'mas1',this.value)"></td>
       </tr>`).join('')}</tbody></table>
-    <div class="section-title mt16" style="font-size:12.5px;">Adicionales (precio por metro, arriba y abajo)</div>
-    <table style="width:100%;font-size:12.5px;"><thead><tr><th style="text-align:left;">Adicional</th><th>Precio por metro</th></tr></thead>
+    <div class="section-title mt16" style="font-size:12.5px;">Adicionales</div>
+    <table style="width:100%;font-size:12.5px;"><thead><tr><th style="text-align:left;">Adicional</th><th>Precio</th></tr></thead>
     <tbody>${state.cotAdicionales.map((a,i)=>`
       <tr>
-        <td>${a.nombre}</td>
+        <td>${a.nombre}<br><span class="text-dim" style="font-size:10.5px;">${a.nombre==='Ojales'?'por ojal — se cobran 4 por banner':'por metro, arriba y abajo'}</span></td>
         <td><input class="input" style="padding:6px 8px;font-size:12px;" type="number" step="1" value="${a.precioMetro}" onchange="updateCotAdicional(${i},'precioMetro',this.value)"></td>
       </tr>`).join('')}</tbody></table>`;
   document.getElementById('modalActions').innerHTML = `<button class="btn btn-primary" onclick="closeModal(); renderVinilosSelect();">Cerrar</button>`;
