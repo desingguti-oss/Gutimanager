@@ -10,6 +10,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <style>
 :root{
   --bg:#0f1115; --bg-soft:#161922; --panel:#1b1f29; --panel-2:#21262f;
@@ -308,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.07.17</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.08.01</div>
   </div>
 </div>
 
@@ -339,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.07.17</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.08.01</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -527,7 +528,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           </div>
           <div id="cotVinOjalesWrap" style="display:none;gap:8px;align-items:center;margin-top:12px;">
             <span class="text-dim" style="font-size:12.5px;">Agregar ojales</span>
-            <div class="toggle-sw" id="cotVinOjales" title="Adicional de ojales arriba y abajo"><div class="dot"></div></div>
+            <div class="toggle-sw" id="cotVinOjales" title="Adicional de 4 ojales (uno por esquina)"><div class="dot"></div></div>
           </div>
           <button class="btn btn-primary mt16" id="btnCotVinCalc">🧮 Calcular</button>
           <div id="cotVinResultado" class="mt16"></div>
@@ -572,7 +573,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
         <div class="section-title">Control de inventario <span class="hint" id="invStockCount"></span></div>
         <p class="text-dim" style="font-size:12px;margin:-6px 0 12px;">Activa el control de stock por producto en Administración. Las unidades se descuentan solas con cada venta.</p>
         <div class="inv-row head">
-          <div>Producto</div><div>Existencias</div><div>Estado</div><div>Agregar entrada</div>
+          <div class="sort-th" onclick="sortInvStock('producto')" id="thInvStockProducto">Producto ↕</div><div class="sort-th" onclick="sortInvStock('exist')" id="thInvStockExist">Existencias ↕</div><div class="sort-th" onclick="sortInvStock('estado')" id="thInvStockEstado">Estado ↕</div><div>Agregar entrada</div>
         </div>
         <div id="invStockList" class="scroll-thin" style="max-height:560px;overflow-y:auto;"></div>
       </div>
@@ -608,13 +609,16 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
       <div class="card mt16">
         <div class="flex-between" style="margin-bottom:10px;">
           <div class="section-title mb0">Historial de cierres <span class="hint" id="cierreHistCount"></span></div>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <input class="input" id="cierreHistFecha" type="date" oninput="renderReportes()" style="max-width:160px;padding:6px 10px;" title="Filtrar por fecha">
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cierreHistFecha').value='';renderReportes();" title="Limpiar filtro">✕</button>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span class="text-dim" style="font-size:11.5px;">Desde</span>
+            <input class="input" id="cierreHistDesde" type="date" oninput="renderReportes()" style="max-width:150px;padding:6px 10px;" title="Filtrar desde esta fecha">
+            <span class="text-dim" style="font-size:11.5px;">Hasta</span>
+            <input class="input" id="cierreHistHasta" type="date" oninput="renderReportes()" style="max-width:150px;padding:6px 10px;" title="Filtrar hasta esta fecha">
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cierreHistDesde').value='';document.getElementById('cierreHistHasta').value='';renderReportes();" title="Limpiar filtro">✕</button>
           </div>
         </div>
         <div class="sticky-table-wrap scroll-thin" style="max-height:360px;">
-          <table><thead><tr><th>Fecha</th><th>Facturas</th><th>Ventas</th><th>Gastos</th><th>Sueldo</th><th>Efectivo a guardar</th><th></th></tr></thead><tbody id="cierreHistBody"></tbody></table>
+          <table><thead><tr><th>Fecha</th><th>Facturas</th><th>Ventas</th><th>Gastos</th><th>Sueldo</th><th>Efectivo a guardar</th><th style="text-align:center;">Recogida</th><th></th></tr></thead><tbody id="cierreHistBody"></tbody></table>
         </div>
       </div>
       <div class="grid mt16" style="grid-template-columns:260px 1fr;gap:16px;">
@@ -629,7 +633,15 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           <button class="btn btn-ghost" id="btnCotejoBuscar" style="padding:10px 14px;">Buscar</button>
         </div>
         <div class="sticky-table-wrap scroll-thin" style="max-height:400px;">
-          <table><thead><tr><th>Fecha</th><th>Factura</th><th>Cliente</th><th>Monto</th><th>Medio de pago</th><th>Verificado</th></tr></thead><tbody id="cotejoBody"></tbody></table>
+          <table><thead><tr>
+            <th class="sort-th" onclick="sortCotejo('fecha')" id="thCotFecha">Fecha ↓</th>
+            <th class="sort-th" onclick="sortCotejo('factura')" id="thCotFactura">Factura ↕</th>
+            <th class="sort-th" onclick="sortCotejo('cliente')" id="thCotCliente">Cliente ↕</th>
+            <th class="sort-th" onclick="sortCotejo('monto')" id="thCotMonto">Monto ↕</th>
+            <th class="sort-th" onclick="sortCotejo('medio')" id="thCotMedio">Medio de pago ↕</th>
+            <th>Verificado</th>
+            <th></th>
+          </tr></thead><tbody id="cotejoBody"></tbody></table>
         </div>
       </div>
       <div class="card mt16">
@@ -670,7 +682,10 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
       <div class="card mt16">
         <div class="flex-between">
           <div class="section-title mb0">Datos de ventas de años anteriores</div>
-          <button class="btn btn-ghost btn-sm" id="btnAddHistoricoAnio">+ Agregar año</button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost btn-sm" id="btnInformeCrecimiento" title="Informe anualizado con todos los años (histórico + sistema)">📄 Informe de crecimiento</button>
+            <button class="btn btn-ghost btn-sm" id="btnAddHistoricoAnio">+ Agregar año</button>
+          </div>
         </div>
         <p class="text-dim" style="font-size:12px;margin:4px 0 12px;">Ingresa aquí el total vendido de cada mes de años anteriores (antes de usar este sistema) para no perder el histórico de ventas del negocio. El total anual y el crecimiento se calculan solos. Todo es editable.</p>
         <div class="sticky-table-wrap scroll-thin" style="max-height:440px;">
@@ -779,7 +794,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
           <p class="text-dim" style="font-size:11.5px;margin:8px 0 0;">Agot. = agotado · Stock = controlar existencias · Tallas = manejar por talla · Tipo = A adulto / N niño · Cotizar = precio manual al vender</p>
           <div class="sticky-table-wrap scroll-thin" style="max-height:520px;">
             <div class="admin-row head mt8">
-              <div>EAN</div><div>Nombre</div><div>Categoría</div><div>Detal</div><div>Mayor</div><div>Agot.</div><div>Stock</div><div>Tallas</div><div>Tipo</div><div>Cotizar</div><div></div>
+              <div class="sort-th" onclick="sortAdminProd('ean')" id="thAdmEan">EAN ↕</div><div class="sort-th" onclick="sortAdminProd('nombre')" id="thAdmNombre">Nombre ↕</div><div class="sort-th" onclick="sortAdminProd('categoria')" id="thAdmCategoria">Categoría ↕</div><div class="sort-th" onclick="sortAdminProd('detal')" id="thAdmDetal">Detal ↕</div><div class="sort-th" onclick="sortAdminProd('mayor')" id="thAdmMayor">Mayor ↕</div><div>Agot.</div><div>Stock</div><div>Tallas</div><div>Tipo</div><div>Cotizar</div><div></div>
             </div>
             <div id="adminProductList"></div>
           </div>
@@ -820,7 +835,10 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
         <div class="section-title mb0">Estado de los datos</div>
         <p class="text-dim" style="font-size:12.5px;">Cuánto pesan los datos del sistema y cuánto de eso son imágenes (comprobantes y logo). Útil para vigilar el crecimiento con los años.</p>
         <div id="dataSizeInfo" class="text-dim" style="font-size:13px;margin-top:8px;">Calculando…</div>
-        <button class="btn btn-ghost mt8" onclick="renderDataSize()">🔄 Recalcular</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+          <button class="btn btn-ghost" onclick="renderDataSize()">🔄 Recalcular</button>
+          <button class="btn btn-primary" onclick="migrateProofsToStorage()">☁️ Mover comprobantes a la nube</button>
+        </div>
       </div>
     </section>
 
@@ -872,6 +890,11 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDb   = firebase.database();
+/* Firebase Storage: aquí viven las FOTOS de los comprobantes de pago, por
+   fuera del JSON que se sincroniza. Así el "paquete" que viaja en cada guardado
+   y en localStorage se mantiene liviano para siempre, sin importar cuántas
+   fotos se adjunten con los años. Cada factura solo guarda un enlace (URL). */
+const fbStorage = firebase.storage();
 const AUTHORIZED_EMAIL = "desing.guti@gmail.com";
 const CLIENT_ID = Math.random().toString(36).slice(2) + "_" + Date.now().toString(36);
 let fbUser = null;
@@ -892,8 +915,11 @@ let initialSyncPending = true;
    de "qué hay en la nube primero" lo sobrescriba de inmediato. */
 const FORCE_PUSH_KEY = "studio_force_push_once";
 
-/* Firebase Realtime Database guarda el JSON completo en un solo nodo.
-   No hay límite práctico para el tamaño de este estado (~100 KB máx.). */
+/* Firebase Realtime Database guarda el JSON completo (ventas, clientes,
+   facturas, etc.) en un solo nodo — pensado para texto, no para fotos.
+   Las fotos de comprobantes viven aparte, en Firebase Storage (ver arriba),
+   y en el JSON solo queda un enlace. Así este nodo se mantiene liviano
+   para siempre, sin importar cuántos años y facturas acumule el sistema. */
 
 /* ── FONT SCALE ── */
 let fontScale = parseInt(localStorage.getItem('studioFontScale')||'0');
@@ -911,6 +937,9 @@ function adjustFont(dir){
 let facturasSort  = {col:'fecha', asc:false};
 let carteraSort   = {col:'fecha', asc:false};
 let clientesSort  = {col:'total', asc:false};
+let cotejoSort    = {col:'fecha', asc:false};
+let adminSort     = {col:null, asc:true}; // null = orden original (nuevos productos arriba)
+let invStockSort  = {col:null, asc:true}; // null = orden original
 
 /* ── CIERRE DATE OVERRIDE ── */
 let cierreDateOverride = null;
@@ -1039,10 +1068,13 @@ function mergeClients(existingArr, incomingArr){
     const k = keyOf(c);
     const prev = map.get(k);
     if(!prev){ map.set(k, Object.assign({}, c, {purchases: Array.isArray(c.purchases)?c.purchases.slice():[]})); return; }
-    const purchaseMap = new Map();
-    (prev.purchases||[]).forEach(p=>{ purchaseMap.set(String(p.invoiceId!==undefined?p.invoiceId:JSON.stringify(p)), p); });
-    (c.purchases||[]).forEach(p=>{ purchaseMap.set(String(p.invoiceId!==undefined?p.invoiceId:JSON.stringify(p)), p); });
-    const mergedPurchases = Array.from(purchaseMap.values());
+    // dedupePurchases() usa invoiceId (o total+items si no hay invoiceId) como
+    // identidad real de la compra, en vez de JSON.stringify(p) completo — esa
+    // versión anterior incluía la fecha exacta, que cambiaba en cada fusión y
+    // por eso nunca coincidía, dejando que las compras se acumularan sin
+    // límite en cada sincronización (así fue como una sola factura terminó
+    // copiada 428.287 veces en el historial de una clienta).
+    const mergedPurchases = dedupePurchases((prev.purchases||[]).concat(c.purchases||[]));
     const totalSpent = mergedPurchases.reduce((sum,p)=> sum + (Number(p.total)||0), 0);
     map.set(k, Object.assign({}, prev, c, { purchases: mergedPurchases, totalSpent: totalSpent }));
   });
@@ -1073,13 +1105,23 @@ function applyLoadedJson(raw, opts){
           merged.cashClosures = Array.from(allKeys).map(dk=>{
             const local = localMap.get(dk);
             const remote = remoteMap.get(dk);
+            // La marca de "recogida" (efectivo recogido) se conserva venga de
+            // donde venga: si cualquiera de las dos copias del cierre la tiene,
+            // el cierre fusionado la mantiene (no se pierde entre PCs).
+            const conRecogida = (ganador, otro)=>{
+              if(ganador && otro && otro.recogida && !ganador.recogida){
+                ganador.recogida = true;
+                ganador.recogidaDate = otro.recogidaDate || null;
+              }
+              return ganador;
+            };
             // Si el local está cerrado (_ventasMigrated), siempre gana
-            if(local && local._ventasMigrated) return local;
+            if(local && local._ventasMigrated) return conRecogida(local, remote);
             // Si solo existe remoto (o solo local sin cerrar), usar el que exista
             if(!local) return remote;
             if(!remote) return local;
             // Si ninguno está cerrado, el remoto gana (sync normal)
-            return remote;
+            return conRecogida(remote, local);
           });
         }
         merged.clients = mergeClients(state.clients, incoming.clients);
@@ -1135,9 +1177,28 @@ function applyLoadedJson(raw, opts){
     PRODUCTS.forEach(normalizeProduct);
   }catch(e){ console.warn("No se pudo aplicar lo cargado:", e); }
 }
+let oversizedCloudWarned = false;
 async function doCloudPush(){
   if(!fbUser || applyingRemote || pendingCloudJson===null) return;
   const toSend = pendingCloudJson;
+  // Red de seguridad: si por algún error futuro los datos vuelven a inflarse
+  // muchísimo (como pasó con las 428.287 compras duplicadas de una clienta,
+  // que llevaron el paquete a 68.6MB), Firebase rechaza el guardado con
+  // "Write too large" y antes el sistema reintentaba sin parar cada pocos
+  // segundos para siempre — eso fue lo que puso lenta la app y llegó a
+  // agotar la memoria del navegador. Ahora, si el paquete es sospechosamente
+  // grande, se avisa una sola vez en vez de reintentar en bucle infinito.
+  const SAFE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB: bien por debajo de donde Firebase empezó a fallar (68.6MB)
+  if(toSend.length > SAFE_SIZE_BYTES){
+    pendingCloudJson = null;
+    setSyncStatus(false, "Datos demasiado grandes para la nube");
+    if(!oversizedCloudWarned){
+      oversizedCloudWarned = true;
+      console.error('⚠️ El paquete a subir pesa '+(toSend.length/1048576).toFixed(1)+'MB, muy por encima de lo normal. No se reintentará automáticamente para evitar que la app se ponga lenta. Revisa "Estado de los datos" y avísale a Claude.');
+      toast('⚠️ Tus datos pesan demasiado para subir a la nube ('+(toSend.length/1048576).toFixed(1)+'MB). La app no se pondrá lenta reintentando sola, pero avísale a Claude para revisar qué está pesando tanto.');
+    }
+    return;
+  }
   pendingCloudJson = null;
   try {
     // Firebase Realtime Database: set() reemplaza el nodo completo atómicamente.
@@ -1303,7 +1364,7 @@ fbAuth.onAuthStateChanged(async (user) => {
   if(user && user.email && user.email.toLowerCase() === AUTHORIZED_EMAIL.toLowerCase()){
     fbUser = user;
     showApp();
-    loadState();
+    await loadState();
     applyBrandToUI();
     document.getElementById('pageDate').textContent = todayStr();
     cloudSeeded = false;
@@ -1345,7 +1406,6 @@ let STUDIO = { name:"Estudio Fotográfico", nit:"NIT 000.000.000-0", addr:"Tu di
 let LOGO = null; // base64 image
 let ADMIN_PASS = "admin123";
 let adminUnlocked = false;
-let invStockUnlocked = false;
 
 let state = {
   sales: [],
@@ -1427,7 +1487,52 @@ function getDayPayments(dateObj){
   return out;
 }
 
-/* ================= PERSISTENCIA (localStorage) ================= */
+/* ================= PERSISTENCIA (localStorage) =================
+   La copia local vive en localStorage: es síncrono e instantáneo, y por eso
+   se restauró este motor tras detectar que una versión anterior, que
+   guardaba en IndexedDB en su lugar, volvía lenta toda la aplicación.
+   El respaldo manual (botón "Descargar respaldo .json") NO se ve afectado
+   por este cambio: siempre se genera desde los datos vivos en memoria
+   (buildSavePayload()), nunca desde aquí — ver exportBackup().
+   Nota: si esta PC llegó a usar esa versión anterior (v2026.07.22) y por
+   eso localStorage quedó vacío (los datos habían quedado solo en
+   IndexedDB), recoverFromIndexedDBOnce() los rescata una sola vez para que
+   nadie pierda información al volver a este motor. */
+const IDB_NAME = 'studio_manager_db';
+const IDB_STORE = 'kv';
+let idbOpenPromise = null;
+function idbOpen(){
+  if(idbOpenPromise) return idbOpenPromise;
+  idbOpenPromise = new Promise((resolve, reject)=>{
+    if(!window.indexedDB){ reject(new Error('IndexedDB no disponible en este navegador')); return; }
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = ()=>{ if(!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE); };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+  return idbOpenPromise;
+}
+function idbGet(key){
+  return idbOpen().then(db=>new Promise((resolve, reject)=>{
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  }));
+}
+/* Rescate único: solo se usa si localStorage está vacío al cargar (ver
+   loadState). Si esta PC alguna vez tuvo datos guardados en IndexedDB (por
+   haber usado la versión anterior) los copia de vuelta a localStorage. Si
+   nunca hubo nada en IndexedDB, no hace nada. */
+async function recoverFromIndexedDBOnce(){
+  try{
+    const fromIdb = await idbGet(SAVE_KEY);
+    if(fromIdb){
+      localStorage.setItem(SAVE_KEY, fromIdb);
+      console.log('✅ Datos recuperados de IndexedDB (versión anterior) hacia localStorage');
+    }
+  }catch(e){ console.warn('No se pudo revisar IndexedDB en busca de datos previos:', e); }
+}
 const SAVE_KEY = "studio_manager_data_v1";
 let lastSaveErrorToastAt = 0;
 /* El guardado local (comprimir + escribir) es pesado y congelaba la interfaz
@@ -1453,7 +1558,7 @@ function flushLocalSave(){
     const now = Date.now();
     if(now - lastSaveErrorToastAt > 8000){
       lastSaveErrorToastAt = now;
-      toast('⚠️ El guardado local falló, pero los datos se están subiendo a la nube. Descarga un respaldo por seguridad.');
+      toast('⚠️ El guardado local falló (posiblemente sin espacio), pero los datos se están subiendo a la nube. Descarga un respaldo por seguridad.');
     }
   }
 }
@@ -1495,6 +1600,28 @@ function migrateSales(){
    mezclas entre dispositivos. Un solo registro con un campo faltante
    (ej. un cliente sin nombre) hacía explotar pantallas completas.
    Esta función se ejecuta en cada carga y deja los datos consistentes. */
+// Quita compras duplicadas del historial de un cliente. Antes de este fix,
+// una compra podía terminar copiada miles (o cientos de miles) de veces por
+// culpa de fusiones repetidas (mismo nombre de cliente, o sincronizaciones
+// entre PCs) que unían las listas de compras con concat() sin revisar si ya
+// existían — así fue como "LIDIA NEIRA" terminó con 428.287 copias de su
+// única factura real. Si la compra tiene invoiceId, ese es su identidad real
+// (una factura = una compra, sin importar cuántas veces se repita el dato).
+// Si no tiene invoiceId, se usa un identificador basado en su contenido
+// (total + items), ignorando la fecha exacta, que antes cambiaba en cada
+// fusión y por eso nunca coincidía.
+function dedupePurchases(purchases){
+  if(!Array.isArray(purchases)) return [];
+  const map = new Map();
+  purchases.forEach(p=>{
+    if(!p || typeof p!=='object') return;
+    const k = (p.invoiceId!==undefined && p.invoiceId!==null && p.invoiceId!=='')
+      ? ('id:'+String(p.invoiceId))
+      : ('anon:'+JSON.stringify({total:p.total, items:p.items}));
+    if(!map.has(k)) map.set(k, p);
+  });
+  return Array.from(map.values());
+}
 function sanitizeState(){
   const repairs = [];
   // Ventas
@@ -1522,7 +1649,15 @@ function sanitizeState(){
       if(!Array.isArray(p.items)) p.items = [];
       if(typeof p.total !== 'number' || isNaN(p.total)) p.total = 0;
     });
-    if(typeof c.totalSpent !== 'number' || isNaN(c.totalSpent)){
+    // Fix de duplicados: si una compra quedó repetida (a veces cientos de
+    // miles de veces) por fusiones anteriores, aquí se colapsa a una sola.
+    const beforeCount = c.purchases.length;
+    c.purchases = dedupePurchases(c.purchases);
+    const wasDeduped = c.purchases.length !== beforeCount;
+    if(wasDeduped){
+      repairs.push('compras duplicadas de '+c.name+' ('+beforeCount+' -> '+c.purchases.length+')');
+    }
+    if(wasDeduped || typeof c.totalSpent !== 'number' || isNaN(c.totalSpent)){
       c.totalSpent = c.purchases.reduce((a,p)=>a+(p.total||0),0);
       repairs.push('total de '+c.name);
     }
@@ -1535,8 +1670,8 @@ function sanitizeState(){
     const prev = seenNames.get(k);
     if(!prev){ seenNames.set(k, c); uniqueClients.push(c); }
     else {
-      prev.purchases = prev.purchases.concat(c.purchases);
-      prev.totalSpent += c.totalSpent;
+      prev.purchases = dedupePurchases(prev.purchases.concat(c.purchases));
+      prev.totalSpent = prev.purchases.reduce((a,p)=>a+(p.total||0),0);
       if(!prev.phone && c.phone) prev.phone = c.phone;
       if(!prev.doc && c.doc) prev.doc = c.doc;
       repairs.push('cliente duplicado: '+c.name);
@@ -1619,8 +1754,12 @@ function backfillPurchaseInvoiceIds(){
     });
   });
 }
-function loadState(){
-  const raw = localStorage.getItem(SAVE_KEY);
+async function loadState(){
+  let raw = localStorage.getItem(SAVE_KEY);
+  if(!raw){
+    await recoverFromIndexedDBOnce();
+    raw = localStorage.getItem(SAVE_KEY);
+  }
   if(!raw) return;
   // Intenta descomprimir (formato nuevo con LZ-String).
   // Si el dato estaba sin comprimir (versión anterior), decompressFromUTF16
@@ -2112,15 +2251,70 @@ function fileToCompressedDataURL(file, maxDim, quality){
     reader.readAsDataURL(file);
   });
 }
+/* Convierte un dataURL (base64) en un Blob binario, para poder subirlo
+   a Firebase Storage en vez de guardarlo embebido en el JSON. */
+function dataURLtoBlob(dataurl){
+  const arr = dataurl.split(',');
+  const mimeMatch = arr[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while(n--){ u8arr[n] = bstr.charCodeAt(n); }
+  return new Blob([u8arr], {type:mime});
+}
+/* Sube un comprobante ya comprimido a Firebase Storage y devuelve su URL
+   pública de descarga. Si esto falla (sin internet, reglas de Storage sin
+   configurar, etc.) quien llama debe capturar el error y usar el dataURL
+   local como respaldo, para que adjuntar un comprobante NUNCA falle del
+   todo — en el peor caso queda embebido como antes, y se puede migrar
+   después con el botón "Mover comprobantes a la nube". */
+async function uploadProofToStorage(saleId, dataUrl){
+  if(!fbUser) throw new Error('sin-sesion');
+  const blob = dataURLtoBlob(dataUrl);
+  const path = `proofs/${fbUser.uid}/${saleId}/${Date.now()}_${Math.random().toString(36).slice(2,8)}.jpg`;
+  const ref = fbStorage.ref().child(path);
+  await ref.put(blob, {contentType:'image/jpeg'});
+  return await ref.getDownloadURL();
+}
 /* Eliminar un comprobante específico de una factura */
 function removeProof(saleId, idx){
   const s = state.sales.find(x=>x.id===saleId);
   if(!s || !Array.isArray(s.proofs) || s.proofs[idx]===undefined) return;
   if(!confirm('¿Eliminar este comprobante de pago?')) return;
+  const removed = s.proofs[idx];
   s.proofs.splice(idx, 1);
   saveState();
   toast('Comprobante eliminado');
   viewInvoice(saleId);
+  // Si vivía en Storage (URL), borrarlo también allá para no dejar basura.
+  // Es "best effort": si falla (sin internet, etc.) no importa, no bloquea nada.
+  if(removed && typeof removed === 'string' && removed.startsWith('http')){
+    try{ fbStorage.refFromURL(removed).delete().catch(()=>{}); }catch(e){}
+  }
+}
+/* Migra a Firebase Storage los comprobantes que quedaron embebidos como
+   base64 (dataURL) en el JSON — ya sea de antes de este cambio, o porque
+   en su momento no había internet y se guardaron localmente de respaldo.
+   Después de migrar, el peso del JSON sincronizado baja de inmediato. */
+async function migrateProofsToStorage(){
+  if(!fbUser){ toast('Debes iniciar sesión primero'); return; }
+  const pending = [];
+  state.sales.forEach(s=>{ (s.proofs||[]).forEach((p,idx)=>{ if(p && p.startsWith('data:')) pending.push({s,idx}); }); });
+  if(!pending.length){ toast('No hay comprobantes por migrar — ya están todos en la nube'); return; }
+  toast(`Migrando ${pending.length} comprobante(s) a almacenamiento en la nube…`);
+  let ok=0, fail=0;
+  for(const {s,idx} of pending){
+    try{
+      const url = await uploadProofToStorage(s.id, s.proofs[idx]);
+      s.proofs[idx] = url;
+      ok++;
+    }catch(e){ console.warn('No se pudo migrar un comprobante:', e); fail++; }
+  }
+  saveState();
+  renderDataSize();
+  if(fail===0) toast(`✅ Migración completa: ${ok} comprobante(s) movidos a la nube`);
+  else toast(`Migrados ${ok}, fallaron ${fail}. Revisa tu conexión e inténtalo de nuevo.`);
 }
 /* Visor de imágenes (comprobantes) — evita usar window.open con base64 que se queda trabado */
 function viewProofImage(src){
@@ -2240,7 +2434,18 @@ function viewInvoice(id){
           // 3-5MB; comprimida queda en ~100-200KB. Sin esto, unos pocos
           // comprobantes llenarían el almacenamiento otra vez.
           const durl = await fileToCompressedDataURL(f);
-          s.proofs.push(durl);
+          try{
+            // Preferido: subir a Firebase Storage y guardar solo el enlace.
+            // Así la foto NUNCA viaja dentro del JSON que se sincroniza.
+            const url = await uploadProofToStorage(id, durl);
+            s.proofs.push(url);
+          }catch(uploadErr){
+            // Sin internet o sin permisos de Storage todavía: se guarda
+            // embebido como respaldo, y luego se puede migrar con el botón
+            // "Mover comprobantes a la nube" en Exportar Datos.
+            console.warn('No se pudo subir a Storage, se guarda local por ahora:', uploadErr);
+            s.proofs.push(durl);
+          }
         }catch(err){ console.warn('No se pudo procesar un archivo:', err); }
       }
       saveState();
@@ -2836,7 +3041,8 @@ function stockPill(p){
   return `<span class="stock-pill stock-ok">${tot} und</span>`;
 }
 function requireStockPassword(onSuccess){
-  if(invStockUnlocked){ onSuccess(); return; }
+  // Contraseña para modificar existencias: si es correcta, se aplica el
+  // cambio y la ventana se CIERRA sola. Se pide en cada modificación.
   document.getElementById('modalTitle').textContent = 'Verificación requerida';
   document.getElementById('modalBody').innerHTML = `
     <p class="text-dim" style="font-size:12.5px;">Ingresa la contraseña para modificar las existencias del inventario.</p>
@@ -2846,9 +3052,28 @@ function requireStockPassword(onSuccess){
   document.getElementById('modalDetail').classList.add('show');
   document.getElementById('btnStockPassOk').addEventListener('click', ()=>{
     const val = document.getElementById('stockPassInput').value;
-    if(val==='Thomas'){ invStockUnlocked = true; closeModal(); onSuccess(); }
+    if(val==='Thomas'){ closeModal(); onSuccess(); }
     else { document.getElementById('stockPassErr').textContent = 'Contraseña incorrecta'; }
   });
+  // Enter en el campo de contraseña = Confirmar
+  document.getElementById('stockPassInput').addEventListener('keydown', e=>{
+    if(e.key==='Enter') document.getElementById('btnStockPassOk').click();
+  });
+  setTimeout(()=>document.getElementById('stockPassInput')?.focus(), 50);
+}
+// Ordena la tabla de Inventarios al hacer clic en un título de columna.
+// Primer clic: ascendente (A→Z / de menor a mayor existencia); segundo clic
+// en el mismo título: invierte el orden. Solo cambia cómo se MUESTRA la
+// lista — nunca modifica las existencias ni el orden guardado de los productos.
+function sortInvStock(col){
+  if(invStockSort.col===col) invStockSort.asc=!invStockSort.asc;
+  else { invStockSort.col=col; invStockSort.asc=true; }
+  const labels = {producto:'Producto', exist:'Existencias', estado:'Estado'};
+  Object.keys(labels).forEach(c=>{
+    const el = document.getElementById('thInvStock'+c.charAt(0).toUpperCase()+c.slice(1));
+    if(el) el.textContent = labels[c] + (invStockSort.col===c ? (invStockSort.asc?' ↑':' ↓') : ' ↕');
+  });
+  renderInvStock();
 }
 function renderInvStock(){
   const cont = document.getElementById('invStockList');
@@ -2857,6 +3082,25 @@ function renderInvStock(){
   const q = document.getElementById('invStockSearch').value.toLowerCase().trim();
   const list = PRODUCTS.filter(p=>p.controlStock && (invStockFilterCat==="TODAS"||p.categoria===invStockFilterCat) &&
     (p.nombre.toLowerCase().includes(q)||String(p.ean).includes(q)));
+  if(invStockSort.col){
+    const col = invStockSort.col, asc = invStockSort.asc;
+    // Estado: agotado (0) < bajo (1) < con stock (2); a igual estado, por cantidad.
+    const rank = p=>{ const t=prodStockTotal(p); if(t<=0) return 0; if(t<=(p.stockMin||3)) return 1; return 2; };
+    list.sort((a,b)=>{
+      if(col==='producto'){
+        const sa=String(a.nombre).toLowerCase(), sb=String(b.nombre).toLowerCase();
+        return asc ? sa.localeCompare(sb,'es') : sb.localeCompare(sa,'es');
+      }
+      if(col==='exist'){
+        const na=prodStockTotal(a), nb=prodStockTotal(b);
+        return asc ? na-nb : nb-na;
+      }
+      const ra=rank(a), rb=rank(b);
+      if(ra!==rb) return asc ? ra-rb : rb-ra;
+      const na=prodStockTotal(a), nb=prodStockTotal(b);
+      return asc ? na-nb : nb-na;
+    });
+  }
   document.getElementById('invStockCount').textContent = list.length + " con control";
 
   // KPIs
@@ -2914,13 +3158,13 @@ function renderInvStock(){
   cont.querySelectorAll('.inv-stock-input:not(.inv-add-input)').forEach(inp=>{
     inp.addEventListener('change', e=>{
       const idx = parseInt(e.target.dataset.idx), val = Math.max(0, parseInt(e.target.value)||0);
-      requireAnularPassword(()=>{ PRODUCTS[idx].stock = val; saveState(); renderInvStock(); renderProductGrid(); });
+      requireStockPassword(()=>{ PRODUCTS[idx].stock = val; saveState(); renderInvStock(); renderProductGrid(); toast('Existencias actualizadas'); });
     });
   });
   cont.querySelectorAll('.inv-talla-input').forEach(inp=>{
     inp.addEventListener('change', e=>{
       const idx = parseInt(e.target.dataset.idx), talla = e.target.dataset.talla, val = Math.max(0, parseInt(e.target.value)||0);
-      requireAnularPassword(()=>{ PRODUCTS[idx].tallas[talla] = val; saveState(); renderInvStock(); renderProductGrid(); });
+      requireStockPassword(()=>{ PRODUCTS[idx].tallas[talla] = val; saveState(); renderInvStock(); renderProductGrid(); toast('Existencias actualizadas'); });
     });
   });
 }
@@ -3028,7 +3272,10 @@ function renderHistorico(){
     prevTotal = total;
     const mesesHtml = Array.from({length:12}, (_,i)=>{
       const v = meses[i];
-      return `<td><input class="input" type="number" value="${v===undefined||v===null||v===''?'':v}" placeholder="0" style="width:90px;padding:6px;font-size:12px;" onchange="updateHistoricoCell('${anio}',${i},this.value)"></td>`;
+      const vv = v===undefined||v===null||v===''?'':v;
+      // width 128px: cabe completo un valor de 8 cifras (hasta 99.000.000).
+      // El title muestra el valor formateado con puntos al pasar el mouse.
+      return `<td><input class="input" type="number" min="0" value="${vv}" placeholder="0" title="${vv===''?'':money(parseFloat(vv)||0)}" style="width:128px;padding:6px;font-size:12px;" onchange="updateHistoricoCell('${anio}',${i},this.value)"></td>`;
     }).join('');
     return `<tr>
       <td><b>${anio}</b></td>
@@ -3068,6 +3315,120 @@ function deleteHistoricoAnio(anio){
   renderReportes();
 }
 document.getElementById('btnAddHistoricoAnio')?.addEventListener('click', addHistoricoAnio);
+
+// ===== Informe general anualizado de crecimiento =====
+// Combina, año por año, el histórico manual ("Datos de ventas de años
+// anteriores") con las ventas reales registradas en el sistema (dinero
+// recibido: abonos cuentan por lo abonado, igual que en los cierres).
+// Solo LEE los datos — no modifica ni borra nada.
+function printInformeCrecimiento(){
+  const sistema = {};
+  state.sales.filter(s=>s.status!=='Anulada').forEach(s=>{
+    const pays = (s.payments && s.payments.length) ? s.payments : [{date:s.date, amount:s.total}];
+    pays.forEach(p=>{
+      const y = new Date(p.date).getFullYear();
+      if(!isNaN(y)) sistema[y] = (sistema[y]||0) + (Number(p.amount)||0);
+    });
+  });
+  const anios = Array.from(new Set(Object.keys(state.historico||{}).concat(Object.keys(sistema))))
+    .map(a=>parseInt(a)).filter(a=>!isNaN(a)).sort((a,b)=>a-b);
+  if(!anios.length){ toast('No hay datos de ventas para generar el informe'); return; }
+
+  const anioActual = new Date().getFullYear();
+  let prev = null;
+  const rows = anios.map(a=>{
+    const hist = historicoAnioTotal(String(a));
+    const sis  = sistema[a]||0;
+    const total = hist + sis;
+    // El año en curso está incompleto: se muestra, pero su % de crecimiento
+    // no se calcula (compararlo contra un año completo sería engañoso).
+    const enCurso = a===anioActual;
+    const crec = (prev!==null && prev>0 && !enCurso) ? ((total-prev)/prev)*100 : null;
+    const fuente = (hist>0&&sis>0) ? 'Histórico + Sistema' : (sis>0 ? 'Sistema' : 'Histórico');
+    const row = {anio:a, total, crec, enCurso, fuente};
+    prev = total;
+    return row;
+  });
+
+  const totalAcum = rows.reduce((x,r)=>x+r.total,0);
+  const completos = rows.filter(r=>!r.enCurso && r.total>0);
+  const mejor = completos.length ? completos.reduce((m,r)=>r.total>m.total?r:m) : null;
+  const crecs = rows.filter(r=>r.crec!==null).map(r=>r.crec);
+  const crecProm = crecs.length ? crecs.reduce((x,c)=>x+c,0)/crecs.length : null;
+  const maxTotal = Math.max(...rows.map(r=>r.total), 1);
+  const pc = 'print-color-adjust:exact;-webkit-print-color-adjust:exact;';
+
+  const area = document.getElementById('printArea');
+  area.classList.add('print-letter');
+  area.innerHTML = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;color:#000;">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #7c5cff;padding-bottom:14px;margin-bottom:18px;">
+        <div style="display:flex;gap:14px;align-items:center;">
+          ${LOGO?`<img src="${LOGO}" style="max-width:60px;max-height:60px;object-fit:contain;">`:''}
+          <div>
+            <div style="font-size:18px;font-weight:700;">${STUDIO.name}</div>
+            <div style="font-size:11.5px;color:#555;">${STUDIO.nit}<br>${STUDIO.addr}</div>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:18px;font-weight:700;color:#7c5cff;">INFORME DE CRECIMIENTO ANUAL</div>
+          <div style="font-size:12px;color:#555;">Generado: ${new Date().toLocaleString('es-CO')}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;margin-bottom:20px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:150px;background:#f3f0ff;border-radius:8px;padding:12px;text-align:center;${pc}">
+          <div style="font-size:11px;color:#555;">AÑOS CON DATOS</div>
+          <div style="font-size:20px;font-weight:700;color:#7c5cff;">${rows.length}</div>
+        </div>
+        <div style="flex:1;min-width:150px;background:#f3f0ff;border-radius:8px;padding:12px;text-align:center;${pc}">
+          <div style="font-size:11px;color:#555;">VENTAS ACUMULADAS</div>
+          <div style="font-size:20px;font-weight:700;color:#7c5cff;">${money(totalAcum)}</div>
+        </div>
+        <div style="flex:1;min-width:150px;background:#f3f0ff;border-radius:8px;padding:12px;text-align:center;${pc}">
+          <div style="font-size:11px;color:#555;">MEJOR AÑO</div>
+          <div style="font-size:20px;font-weight:700;color:#7c5cff;">${mejor?mejor.anio:'—'}</div>
+          <div style="font-size:11px;color:#555;">${mejor?money(mejor.total):''}</div>
+        </div>
+        <div style="flex:1;min-width:150px;background:#f3f0ff;border-radius:8px;padding:12px;text-align:center;${pc}">
+          <div style="font-size:11px;color:#555;">CRECIMIENTO PROMEDIO ANUAL</div>
+          <div style="font-size:20px;font-weight:700;color:${crecProm===null?'#555':(crecProm>=0?'#0a7a45':'#b91c1c')};">${crecProm===null?'—':((crecProm>0?'+':'')+crecProm.toFixed(1)+'%')}</div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:#f1f1f4;${pc}">
+          <th style="text-align:left;padding:8px;border-bottom:2px solid #ddd;">Año</th>
+          <th style="text-align:right;padding:8px;border-bottom:2px solid #ddd;">Ventas del año</th>
+          <th style="text-align:right;padding:8px;border-bottom:2px solid #ddd;">Crecimiento</th>
+          <th style="text-align:left;padding:8px;border-bottom:2px solid #ddd;width:32%;">Comparación</th>
+          <th style="text-align:left;padding:8px;border-bottom:2px solid #ddd;">Fuente</th>
+        </tr></thead>
+        <tbody>
+        ${rows.map(r=>{
+          const w = Math.max(1, Math.round((r.total/maxTotal)*100));
+          const crecTxt = r.enCurso
+            ? '<span style="color:#777;font-size:11.5px;">año en curso</span>'
+            : (r.crec===null ? '<span style="color:#777;">—</span>'
+              : `<b style="color:${r.crec>=0?'#0a7a45':'#b91c1c'};">${r.crec>0?'+':''}${r.crec.toFixed(1)}%</b>`);
+          return `<tr>
+            <td style="padding:8px;border-bottom:1px solid #eee;"><b>${r.anio}</b>${r.enCurso?' <span style="font-size:10.5px;color:#777;">(hasta hoy)</span>':''}</td>
+            <td style="text-align:right;padding:8px;border-bottom:1px solid #eee;">${money(r.total)}</td>
+            <td style="text-align:right;padding:8px;border-bottom:1px solid #eee;">${crecTxt}</td>
+            <td style="padding:8px;border-bottom:1px solid #eee;">
+              <div style="background:#ede9ff;border-radius:4px;overflow:hidden;${pc}"><div style="width:${w}%;background:${r.enCurso?'#b3a4ff':'#7c5cff'};height:12px;border-radius:4px;${pc}"></div></div>
+            </td>
+            <td style="padding:8px;border-bottom:1px solid #eee;font-size:11.5px;color:#555;">${r.fuente}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+      <div style="margin-top:14px;font-size:11px;color:#777;">
+        Fuente "Histórico" = valores mensuales digitados en "Datos de ventas de años anteriores". Fuente "Sistema" = dinero realmente recibido según las facturas y abonos registrados en Gutimanager. El año en curso muestra lo recibido hasta la fecha de generación y no participa en el cálculo de crecimiento.
+      </div>
+      <div style="margin-top:16px;border-top:1px solid #ddd;padding-top:8px;text-align:center;font-size:11px;color:#888;">Generado por Studio Manager · ${new Date().toLocaleString('es-CO')}</div>
+    </div>`;
+  setTimeout(()=>{ window.print(); area.classList.remove('print-letter'); }, 50);
+}
+document.getElementById('btnInformeCrecimiento')?.addEventListener('click', printInformeCrecimiento);
 
 /* ================= REPORTES ================= */
 function renderReportes(){
@@ -3112,23 +3473,68 @@ function renderReportes(){
   // Histórico de años anteriores (tabla manual editable)
   renderHistorico();
 
-  // Historial de cierres
-  const cierreHistFecha = document.getElementById('cierreHistFecha')?.value || '';
+  // Historial de cierres — filtro por rango de fechas (Desde / Hasta).
+  // Se usa la fecha LOCAL del cierre (no UTC) para que coincida con la fecha
+  // que se muestra en la tabla; el filtro solo oculta filas, nunca borra cierres.
+  const cierreHistDesde = document.getElementById('cierreHistDesde')?.value || '';
+  const cierreHistHasta = document.getElementById('cierreHistHasta')?.value || '';
+  const hayFiltroCierres = !!(cierreHistDesde || cierreHistHasta);
+  const localDayKey = d => { const x=new Date(d); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
   const allClosures = state.cashClosures.map((c,i)=>({c,i}));
-  const filteredClosures = cierreHistFecha
-    ? allClosures.filter(({c})=>new Date(c.date).toISOString().split('T')[0]===cierreHistFecha)
+  const filteredClosures = hayFiltroCierres
+    ? allClosures.filter(({c})=>{
+        const k = localDayKey(c.date);
+        return (!cierreHistDesde || k>=cierreHistDesde) && (!cierreHistHasta || k<=cierreHistHasta);
+      })
     : allClosures;
   document.getElementById('cierreHistCount').textContent =
-    (cierreHistFecha && filteredClosures.length!==allClosures.length
+    (hayFiltroCierres && filteredClosures.length!==allClosures.length
       ? `${filteredClosures.length} de ` : '') + allClosures.length + " cierres";
   document.getElementById('cierreHistBody').innerHTML = filteredClosures.length ? filteredClosures.slice().reverse().map(({c,i})=>`
     <tr><td>${new Date(c.date).toLocaleDateString('es-CO')}<br><span class="text-dim" style="font-size:11px;">${new Date(c.date).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</span></td>
     <td>${c.count}</td><td>${money(c.ventas||0)}</td>
     <td>${money(c.gastosTotal||0)}</td>
-    <td>${money(c.sueldoMethod==='Efectivo'?(c.sueldo||0):0)}</td>
+    <td>${money(c.sueldo||0)}${(c.sueldo>0&&c.sueldoMethod)?`<br><span class="text-dim" style="font-size:10.5px;">${c.sueldoMethod==='Digital'?'digital':'efectivo'}</span>`:''}</td>
     <td><b>${money(c.efectivoGuardar||0)}</b></td>
+    <td style="text-align:center;"><button class="btn btn-ghost btn-sm" onclick="toggleRecogida(${i})" style="font-size:17px;padding:4px 8px;" title="${c.recogida?('Efectivo recogido'+(c.recogidaDate?(' el '+new Date(c.recogidaDate).toLocaleDateString('es-CO')):'')+' · clic para desmarcar (pide contraseña)'):'Marcar el efectivo como recogido (pide contraseña)'}">${c.recogida?'✅':'⬜'}</button></td>
     <td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="reprintCierre(${i})" title="Imprimir ticket">🖨️</button> <button class="btn btn-ghost btn-sm" onclick="printCierreLetter(${i})" title="Imprimir carta">📄</button> <button class="btn btn-ghost btn-sm" onclick="openEditCierre(${i})" title="Editar">✏️</button></td></tr>`).join('')
-    : `<tr><td colspan="8" class="text-dim">${cierreHistFecha ? 'No hay cierres para esa fecha' : 'No se han realizado cierres'}</td></tr>`;
+    : `<tr><td colspan="8" class="text-dim">${hayFiltroCierres ? 'No hay cierres en ese rango de fechas' : 'No se han realizado cierres'}</td></tr>`;
+}
+
+// ===== Marca de "Recogida" del efectivo en el historial de cierres =====
+// Es solo una marca de control (✅/⬜) sobre el cierre: indica que el efectivo
+// de ese día ya fue recogido físicamente. No borra ni modifica ningún valor
+// del cierre — solo agrega los campos recogida y recogidaDate.
+function requireRecogidaPassword(desmarcar, onSuccess){
+  document.getElementById('modalTitle').textContent = 'Verificación requerida';
+  document.getElementById('modalBody').innerHTML = `
+    <p class="text-dim" style="font-size:12.5px;">${desmarcar
+      ? 'Ingresa la contraseña para quitar la marca de efectivo recogido de este cierre.'
+      : 'Ingresa la contraseña para marcar el efectivo de este cierre como recogido.'}</p>
+    <input class="input" type="password" id="recogidaPassInput" placeholder="Contraseña">
+    <div class="err" id="recogidaPassErr" style="color:var(--red);font-size:12.5px;margin-top:6px;min-height:16px;"></div>`;
+  document.getElementById('modalActions').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" id="btnRecogidaPassOk">Confirmar</button>`;
+  document.getElementById('modalDetail').classList.add('show');
+  document.getElementById('btnRecogidaPassOk').addEventListener('click', ()=>{
+    const val = document.getElementById('recogidaPassInput').value;
+    if(val==='Thomas'){ closeModal(); onSuccess(); }
+    else { document.getElementById('recogidaPassErr').textContent = 'Contraseña incorrecta'; }
+  });
+  document.getElementById('recogidaPassInput').addEventListener('keydown', e=>{
+    if(e.key==='Enter') document.getElementById('btnRecogidaPassOk').click();
+  });
+  setTimeout(()=>document.getElementById('recogidaPassInput')?.focus(), 50);
+}
+function toggleRecogida(i){
+  const c = state.cashClosures[i];
+  if(!c){ toast('No se encontró el cierre'); return; }
+  requireRecogidaPassword(!!c.recogida, ()=>{
+    c.recogida = !c.recogida;
+    c.recogidaDate = c.recogida ? new Date().toISOString() : null;
+    saveState();
+    renderReportes();
+    toast(c.recogida ? '✅ Efectivo marcado como recogido' : 'Marca de recogida quitada');
+  });
 }
 
 function repDetPeriodKey(date, agrupar){
@@ -3228,7 +3634,7 @@ function renderReporteDetallado(){
           <td><b>${money(c.ventas||0)}</b></td>
           <td>${money(c.ingresoEfectivo||0)}</td>
           <td>${money(c.gastosTotal||0)}</td>
-          <td>${money(c.sueldoMethod==='Efectivo'?(c.sueldo||0):0)}</td>
+          <td>${money(c.sueldo||0)}${(c.sueldo>0&&c.sueldoMethod)?` <span class="text-dim" style="font-size:10.5px;">(${c.sueldoMethod==='Digital'?'digital':'efectivo'})</span>`:''}</td>
           <td><b style="color:var(--green)">${money(c.efectivoGuardar||0)}</b></td>
         </tr>`).join('')
       : `<tr><td colspan="7" class="text-dim">Sin cierres en este período</td></tr>`;
@@ -3294,11 +3700,24 @@ function setCotejoStatus(sid, pidx, nuevoEstado){
     toast(labels[nuevoEstado] || 'Estado actualizado');
   }
 }
+function sortCotejo(col){
+  if(cotejoSort.col===col) cotejoSort.asc=!cotejoSort.asc;
+  else { cotejoSort.col=col; cotejoSort.asc=false; }
+  const labels = {fecha:'Fecha', factura:'Factura', cliente:'Cliente', monto:'Monto', medio:'Medio de pago'};
+  Object.keys(labels).forEach(c=>{
+    const el = document.getElementById('thCot'+c.charAt(0).toUpperCase()+c.slice(1));
+    if(el) el.textContent = labels[c] + (cotejoSort.col===c ? (cotejoSort.asc?' ↑':' ↓') : ' ↕');
+  });
+  renderCotejoBanco();
+}
 function renderCotejoBanco(){
   const desdeStr = document.getElementById('cotejofechaDesde')?.value || '';
   const hastaStr = document.getElementById('cotejofechaHasta')?.value || '';
   let payments = [];
 
+  // NOTA: esto solo LEE state.sales para armar la tabla — nunca borra ni
+  // modifica facturas. Los pagos quedan guardados para siempre en cada
+  // factura; ordenar o filtrar aquí no afecta esos datos en lo absoluto.
   state.sales.forEach(s=>{
     if(s.status==='Anulada') return;
     (s.payments||[]).forEach((p, idx)=>{
@@ -3312,10 +3731,23 @@ function renderCotejoBanco(){
     });
   });
 
+  // Orden: se puede hacer clic en cualquier título de columna (Fecha, Factura,
+  // Cliente, Monto, Medio de pago) para ordenar por ese campo; un segundo
+  // clic invierte el orden (ascendente/descendente).
+  payments.sort((a,b)=>{
+    let va, vb;
+    if(cotejoSort.col==='factura'){ va=a.saleId; vb=b.saleId; }
+    else if(cotejoSort.col==='cliente'){ va=a.client.toLowerCase(); vb=b.client.toLowerCase(); return cotejoSort.asc?(va<vb?-1:1):(vb<va?-1:1); }
+    else if(cotejoSort.col==='monto'){ va=a.p.amount; vb=b.p.amount; }
+    else if(cotejoSort.col==='medio'){ va=a.p.method.toLowerCase(); vb=b.p.method.toLowerCase(); return cotejoSort.asc?(va<vb?-1:1):(vb<va?-1:1); }
+    else { va=new Date(a.p.date).getTime(); vb=new Date(b.p.date).getTime(); }
+    return cotejoSort.asc ? va-vb : vb-va;
+  });
+
   const cotejoBody = document.getElementById('cotejoBody');
   if(!cotejoBody) return;
   if(payments.length===0){
-    cotejoBody.innerHTML = `<tr><td colspan="6" class="text-dim">Sin pagos digitales en este período</td></tr>`;
+    cotejoBody.innerHTML = `<tr><td colspan="7" class="text-dim">Sin pagos digitales en este período</td></tr>`;
   } else {
     cotejoBody.innerHTML = payments.map(({p,idx,saleId,client})=>`
       <tr>
@@ -3332,6 +3764,7 @@ function renderCotejoBanco(){
           else if(st==='problema'){bg='#fee2e2';col='#991b1b';txt='✗ Problema';}
           return `<button class="cotejo-status-btn" data-sale="${saleId}" data-idx="${idx}" style="background:${bg};color:${col};border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;font-weight:600;white-space:nowrap;">${txt}</button>`;
         })()}</td>
+        <td style="text-align:center;"><button class="btn btn-ghost btn-sm" onclick="viewInvoice(${saleId})" title="Ver factura y comprobante(s) adjuntos">📄 Ver factura</button></td>
       </tr>`).join('');
     cotejoBody.querySelectorAll('.cotejo-status-btn').forEach(btn=>{
       btn.addEventListener('click', e=>{
@@ -3550,9 +3983,12 @@ function calcVinilo(){
     if(varilla) total += metrosArribaAbajo * varilla.precioMetro;
   }
   const conOjales = ADICIONAL_APLICA.includes(mat.nombre) && document.getElementById('cotVinOjales')?.classList.contains('on');
+  let ojalesSubtotal = 0;
   if(conOjales){
+    // Ojales: se cobran SIEMPRE 4 unidades por banner (uno por esquina).
+    // El precio guardado en Adicionales es el precio POR OJAL.
     const ojales = state.cotAdicionales.find(a=>a.nombre==='Ojales');
-    if(ojales) total += metrosArribaAbajo * ojales.precioMetro;
+    if(ojales){ ojalesSubtotal = 4 * ojales.precioMetro; total += ojalesSubtotal; }
   }
   const extras = [conLaminado?'laminado':null, conVarilla?'varilla':null, conOjales?'ojales':null].filter(Boolean);
   box.innerHTML = `
@@ -3562,7 +3998,7 @@ function calcVinilo(){
       <tr><td>Colores</td><td style="text-align:right;">${colores}</td></tr>
       ${conLaminado?`<tr><td>Incluye laminado</td><td style="text-align:right;">Sí</td></tr>`:''}
       ${conVarilla?`<tr><td>Incluye varilla</td><td style="text-align:right;">Sí</td></tr>`:''}
-      ${conOjales?`<tr><td>Incluye ojales</td><td style="text-align:right;">Sí</td></tr>`:''}
+      ${conOjales?`<tr><td>Incluye ojales (4 und)</td><td style="text-align:right;">${money(ojalesSubtotal)}</td></tr>`:''}
       <tr><td><b>Total</b></td><td style="text-align:right;"><b style="color:var(--green);font-size:15px;">${money(total)}</b></td></tr>
     </table>
     <button class="btn btn-primary mt16" onclick="sendCotizadorToCart('${mat.nombre}${extras.length?(' + '+extras.join(' + ')):''} ${alto}x${ancho}cm', ${total}, 'PUBLICIDAD')">➕ Enviar a venta</button>`;
@@ -3579,11 +4015,11 @@ function openVinilosModal(){
         <td><input class="input" style="padding:6px 8px;font-size:12px;" type="number" step="1" value="${v.menos1}" onchange="updateVinilo(${i},'menos1',this.value)"></td>
         <td><input class="input" style="padding:6px 8px;font-size:12px;" type="number" step="1" value="${v.mas1}" onchange="updateVinilo(${i},'mas1',this.value)"></td>
       </tr>`).join('')}</tbody></table>
-    <div class="section-title mt16" style="font-size:12.5px;">Adicionales (precio por metro, arriba y abajo)</div>
-    <table style="width:100%;font-size:12.5px;"><thead><tr><th style="text-align:left;">Adicional</th><th>Precio por metro</th></tr></thead>
+    <div class="section-title mt16" style="font-size:12.5px;">Adicionales</div>
+    <table style="width:100%;font-size:12.5px;"><thead><tr><th style="text-align:left;">Adicional</th><th>Precio</th></tr></thead>
     <tbody>${state.cotAdicionales.map((a,i)=>`
       <tr>
-        <td>${a.nombre}</td>
+        <td>${a.nombre}<br><span class="text-dim" style="font-size:10.5px;">${a.nombre==='Ojales'?'por ojal — se cobran 4 por banner':'por metro, arriba y abajo'}</span></td>
         <td><input class="input" style="padding:6px 8px;font-size:12px;" type="number" step="1" value="${a.precioMetro}" onchange="updateCotAdicional(${i},'precioMetro',this.value)"></td>
       </tr>`).join('')}</tbody></table>`;
   document.getElementById('modalActions').innerHTML = `<button class="btn btn-primary" onclick="closeModal(); renderVinilosSelect();">Cerrar</button>`;
@@ -3684,9 +4120,44 @@ document.getElementById('btnAddProduct').addEventListener('click', ()=>{
   toast("Producto agregado. Edítalo en la tabla.");
 });
 
+// Ordena la tabla de Gestión de productos al hacer clic en un título de columna.
+// Primer clic en una columna: orden ascendente (A→Z o de menor a mayor);
+// segundo clic en la misma columna: invierte el orden. Solo cambia cómo se
+// MUESTRA la lista — nunca modifica ni reordena los productos guardados.
+function sortAdminProd(col){
+  if(adminSort.col===col) adminSort.asc=!adminSort.asc;
+  else { adminSort.col=col; adminSort.asc=true; }
+  const labels = {ean:'EAN', nombre:'Nombre', categoria:'Categoría', detal:'Detal', mayor:'Mayor'};
+  Object.keys(labels).forEach(c=>{
+    const el = document.getElementById('thAdm'+c.charAt(0).toUpperCase()+c.slice(1));
+    if(el) el.textContent = labels[c] + (adminSort.col===c ? (adminSort.asc?' ↑':' ↓') : ' ↕');
+  });
+  renderAdminProducts();
+}
 function renderAdminProducts(){
   const q = document.getElementById('adminSearch').value.toLowerCase().trim();
   const list = PRODUCTS.filter(p=>p.nombre.toLowerCase().includes(q) || String(p.ean).includes(q));
+  if(adminSort.col){
+    const col = adminSort.col, asc = adminSort.asc;
+    list.sort((a,b)=>{
+      if(col==='ean'){
+        // EAN: orden numérico. Si alguno no es número válido, se compara como texto.
+        const na = Number(a.ean), nb = Number(b.ean);
+        if(isNaN(na) || isNaN(nb)){
+          const sa = String(a.ean), sb = String(b.ean);
+          return asc ? sa.localeCompare(sb) : sb.localeCompare(sa);
+        }
+        return asc ? na-nb : nb-na;
+      }
+      if(col==='detal' || col==='mayor'){
+        const na = Number(a[col])||0, nb = Number(b[col])||0;
+        return asc ? na-nb : nb-na;
+      }
+      // Nombre y Categoría: orden alfabético (sin distinguir mayúsculas/acentos).
+      const sa = String(a[col]||'').toLowerCase(), sb = String(b[col]||'').toLowerCase();
+      return asc ? sa.localeCompare(sb,'es') : sb.localeCompare(sa,'es');
+    });
+  }
   document.getElementById('adminProdCount').textContent = list.length + " productos";
   const wrap = document.getElementById('adminProductList');
   wrap.innerHTML = list.map(p=>{
@@ -3842,10 +4313,10 @@ function renderCierre(){
   document.getElementById('cuadreCaja').innerHTML = `
     <div class="pay-breakdown-row"><span>Ingresos en efectivo</span><b>${money(ingresoEfectivo)}</b></div>
     <div class="pay-breakdown-row neg"><span>− Gastos del día (efectivo)</span><b>- ${money(gTot)}</b></div>
-    <div class="pay-breakdown-row neg"><span>− Sueldo empleado ${sueldoMethod?('('+sueldoMethod+')'):''}</span><b>- ${money(sueldoEfectivo)}</b></div>
+    ${sueldoMethod==='Digital'?'':`<div class="pay-breakdown-row neg"><span>− Sueldo empleado ${sueldoMethod?('('+sueldoMethod+')'):''}</span><b>- ${money(sueldoEfectivo)}</b></div>`}
     <div class="pay-breakdown-row net"><span>Efectivo que debe quedar en caja</span><b>${money(efectivoGuardar)}</b></div>
     <div class="pay-breakdown-row" style="margin-top:10px;"><span>Ingresos digitales (Nequi/Daviplata/BRE-B/QR)</span><b>${money(ingresoDigital)}</b></div>
-    ${sueldoMethod==='Digital'&&sueldoVal>0?`<div class="pay-breakdown-row"><span>Sueldo pagado digital</span><b>${money(sueldoVal)}</b></div>`:''}`;
+    ${sueldoMethod==='Digital'&&sueldoVal>0?`<div class="pay-breakdown-row"><span>Sueldo empleado pagado digital (no sale del efectivo)</span><b>${money(sueldoVal)}</b></div>`:''}`;
 }
 
 function buildClosureSnapshot(allToday){
@@ -4073,13 +4544,13 @@ function printCierreLetter(i){
           <table style="width:100%;border-collapse:collapse;font-size:13px;">
             <tr><td style="padding:7px 10px;border-bottom:1px solid #eee;">Efectivo en caja</td><td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;">${money(snap.ingresoEfectivo)}</td></tr>
             <tr><td style="padding:7px 10px;border-bottom:1px solid #eee;">− Gastos</td><td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;">− ${money(snap.gastosTotal||0)}</td></tr>
-            <tr><td style="padding:7px 10px;border-bottom:1px solid #eee;">− Sueldo ${snap.sueldoMethod==='Efectivo'?'(efectivo)':''}</td><td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;">− ${money(snap.sueldoMethod==='Efectivo'?(snap.sueldo||0):0)}</td></tr>
+            ${snap.sueldoMethod==='Digital'?'':`<tr><td style="padding:7px 10px;border-bottom:1px solid #eee;">− Sueldo ${snap.sueldoMethod==='Efectivo'?'(efectivo)':''}</td><td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;">− ${money(snap.sueldoMethod==='Efectivo'?(snap.sueldo||0):0)}</td></tr>`}
           </table>
           <div style="margin-top:12px;padding:12px;background:#f3f0ff;border-radius:8px;border:2px solid #7c5cff;text-align:center;">
             <div style="font-size:12px;color:#555;margin-bottom:4px;">EFECTIVO A GUARDAR</div>
             <div style="font-size:24px;font-weight:700;color:#7c5cff;">${money(snap.efectivoGuardar)}</div>
           </div>
-          ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="margin-top:8px;font-size:12px;color:#555;">Sueldo pagado digital: ${money(snap.sueldo)}</div>`:''}
+          ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="margin-top:8px;font-size:13px;color:#333;">Sueldo empleado pagado digital: <b>${money(snap.sueldo)}</b> <span style="font-size:11px;color:#777;">(no sale del efectivo)</span></div>`:''}
         </div>
       </div>
       ${(()=>{
@@ -4147,11 +4618,11 @@ function printCierre(snap){
     <div style="font-size:12.5px;">Ingresos en efectivo: <b>${money(snap.ingresoEfectivo)}</b></div>
     <div style="font-size:12.5px;">− Gastos del día: <b>${money(snap.gastosTotal)}</b></div>
     ${snap.gastos.map(g=>`<div style="font-size:11px;color:#555;margin-left:12px;">· ${g.desc}: ${money(g.value)}</div>`).join('')}
-    <div style="font-size:12.5px;">− Sueldo empleado ${snap.sueldoMethod?('('+snap.sueldoMethod+')'):''}: <b>${money(snap.sueldoMethod==='Efectivo'?snap.sueldo:0)}</b></div>
+    ${snap.sueldoMethod==='Digital'?'':`<div style="font-size:12.5px;">− Sueldo empleado ${snap.sueldoMethod?('('+snap.sueldoMethod+')'):''}: <b>${money(snap.sueldoMethod==='Efectivo'?(snap.sueldo||0):0)}</b></div>`}
     <hr>
     <div style="font-size:16px;font-weight:bold;text-align:center;border:2px solid #000;padding:8px;border-radius:6px;">EFECTIVO A GUARDAR<br>${money(snap.efectivoGuardar)}</div>
     <div style="font-size:12px;margin-top:8px;">Ingresos digitales (no en caja): <b>${money(snap.ingresoDigital)}</b></div>
-    ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="font-size:11.5px;color:#555;">Sueldo pagado digital: ${money(snap.sueldo)}</div>`:''}
+    ${snap.sueldoMethod==='Digital'&&snap.sueldo>0?`<div style="font-size:12.5px;">Sueldo empleado pagado digital: <b>${money(snap.sueldo)}</b> <span style="font-size:10.5px;color:#555;">(no sale del efectivo)</span></div>`:''}
     <hr><div style="text-align:center;font-size:11px;color:#666;">Generado por Studio Manager</div>
   </div>`;
   setTimeout(()=>window.print(), 50);
@@ -4244,28 +4715,37 @@ function renderDataSize(){
   try{
     const json = JSON.stringify(buildSavePayload());
     const totalKB = json.length / 1024;
-    // Peso de las imágenes: comprobantes de todas las facturas + logo
-    let imgChars = 0, proofCount = 0;
-    state.sales.forEach(s=>{ (s.proofs||[]).forEach(p=>{ imgChars += (p||'').length; proofCount++; }); });
-    if(LOGO) imgChars += LOGO.length;
+    // Peso de las imágenes QUE TODAVÍA viajan embebidas en el JSON (dataURL).
+    // Las que ya se subieron a Firebase Storage solo dejan un enlace (URL),
+    // que pesa casi nada — por eso se cuentan aparte.
+    let imgChars = 0, proofCount = 0, embeddedCount = 0, migratedCount = 0;
+    state.sales.forEach(s=>{ (s.proofs||[]).forEach(p=>{
+      proofCount++;
+      if(p && p.startsWith('data:')){ imgChars += p.length; embeddedCount++; }
+      else { migratedCount++; }
+    }); });
+    if(LOGO && LOGO.startsWith('data:')) imgChars += LOGO.length;
     const imgKB = imgChars / 1024;
     const pct = totalKB > 0 ? Math.round(imgKB/totalKB*100) : 0;
     const fmt = kb => kb >= 1024 ? (kb/1024).toFixed(1)+' MB' : Math.round(kb)+' KB';
-    // Referencia de capacidad práctica: ~10 MB comprimido en el navegador.
-    // Comprimido ocupa aprox. 1/3, así que el techo real ronda ~30 MB de JSON.
+    // La copia local vive en localStorage, que el navegador limita a un
+    // cupo fijo y chico por sitio (unos 5-10 MB según el navegador). Por
+    // eso esta barra mide qué tan cerca está ese cupo de llenarse: entre
+    // más cerca del límite, más riesgo de que el guardado local falle.
     const usoPct = Math.min(100, Math.round(totalKB/(30*1024)*100));
     const color = usoPct < 50 ? 'var(--green)' : usoPct < 80 ? 'var(--yellow)' : 'var(--red)';
     el.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:6px;">
         <div>📦 Peso total de los datos: <b>${fmt(totalKB)}</b></div>
-        <div>🖼️ Imágenes (${proofCount} comprobante${proofCount===1?'':'s'} + logo): <b>${fmt(imgKB)}</b> — ${pct}% del total</div>
+        <div>🖼️ Comprobantes (${proofCount}): <b>${migratedCount}</b> en almacenamiento en la nube (no ocupan espacio aquí) · <b>${embeddedCount}</b> todavía embebido${embeddedCount===1?'':'s'} (<b>${fmt(imgKB)}</b>, ${pct}% del total)</div>
         <div>🧾 Facturas: <b>${state.sales.length}</b> · Clientes: <b>${state.clients.length}</b> · Cierres: <b>${state.cashClosures.length}</b> · Cotizaciones: <b>${state.quotes.length}</b></div>
         <div style="margin-top:4px;">Capacidad usada: <b style="color:${color}">${usoPct}%</b>
           <div style="background:var(--panel-2);border-radius:6px;height:8px;margin-top:4px;max-width:340px;overflow:hidden;">
             <div style="background:${color};height:100%;width:${Math.max(usoPct,2)}%;border-radius:6px;"></div>
           </div>
         </div>
-        ${usoPct>=80?'<div style="color:var(--red);font-size:12px;">⚠️ Es momento de mover los comprobantes a almacenamiento aparte. Avísale a Claude.</div>':usoPct>=50?'<div style="color:var(--yellow);font-size:12px;">Los datos van creciendo — nada urgente, pero coméntale a Claude en la próxima mejora.</div>':'<div style="font-size:12px;">Hay espacio de sobra. Todo en orden.</div>'}
+        ${embeddedCount>0?`<div style="color:var(--yellow);font-size:12px;">📎 Hay ${embeddedCount} comprobante(s) sin migrar. Usa el botón "☁️ Mover comprobantes a la nube" para liberar espacio local ahora mismo.</div>`:''}
+        ${usoPct>=80?'<div style="color:var(--red);font-size:12px;">⚠️ Cerca del límite de espacio local. Migra los comprobantes pendientes a la nube; si ya no hay ninguno y sigue en rojo, avísale a Claude.</div>':usoPct>=50?'<div style="color:var(--yellow);font-size:12px;">Los datos van creciendo — nada urgente, pero coméntale a Claude en la próxima mejora.</div>':'<div style="font-size:12px;">Todo liviano. Sin problema de espacio ni de velocidad.</div>'}
       </div>`;
   }catch(e){
     el.textContent = 'No se pudo calcular el tamaño.';
