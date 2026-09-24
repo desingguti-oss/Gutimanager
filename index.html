@@ -309,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.08.01</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.08.02</div>
   </div>
 </div>
 
@@ -340,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.08.01</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.08.02</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -1105,18 +1105,29 @@ function applyLoadedJson(raw, opts){
           merged.cashClosures = Array.from(allKeys).map(dk=>{
             const local = localMap.get(dk);
             const remote = remoteMap.get(dk);
-            // La marca de "recogida" (efectivo recogido) se conserva venga de
-            // donde venga: si cualquiera de las dos copias del cierre la tiene,
-            // el cierre fusionado la mantiene (no se pierde entre PCs).
+            // Marca de "recogida": gana el cambio MÁS RECIENTE (marcar o
+            // desmarcar), según recogidaUpdatedAt. Para marcas viejas sin esa
+            // fecha, si cualquiera de las dos copias la tiene, se conserva.
             const conRecogida = (ganador, otro)=>{
-              if(ganador && otro && otro.recogida && !ganador.recogida){
+              if(!ganador || !otro) return ganador;
+              const tg = ganador.recogidaUpdatedAt||0, to = otro.recogidaUpdatedAt||0;
+              if(to > tg){
+                ganador.recogida = !!otro.recogida;
+                ganador.recogidaDate = otro.recogidaDate || null;
+                ganador.recogidaUpdatedAt = to;
+              } else if(!tg && !to && otro.recogida && !ganador.recogida){
                 ganador.recogida = true;
                 ganador.recogidaDate = otro.recogidaDate || null;
               }
               return ganador;
             };
-            // Si el local está cerrado (_ventasMigrated), siempre gana
-            if(local && local._ventasMigrated) return conRecogida(local, remote);
+            // Si el local está cerrado (_ventasMigrated), gana — salvo que la
+            // copia remota también esté cerrada y sea MÁS RECIENTE (fue editada
+            // o se le sumaron saldos en la otra PC después): ahí gana la remota.
+            if(local && local._ventasMigrated){
+              if(remote && remote._ventasMigrated && (remote.updatedAt||0) > (local.updatedAt||0)) return conRecogida(remote, local);
+              return conRecogida(local, remote);
+            }
             // Si solo existe remoto (o solo local sin cerrar), usar el que exista
             if(!local) return remote;
             if(!remote) return local;
@@ -1133,9 +1144,17 @@ function applyLoadedJson(raw, opts){
         merged.lastCierre = lcLocal >= lcIncoming ? (state.lastCierre||null) : (incoming.lastCierre||null);
         // gastosDia: mezclar, pero eliminar los que pertenecen a días ya cerrados
         const allGastos = mergeArraysByKey(state.gastosDia, incoming.gastosDia, g=>g && g.id);
-        const closedKeys = new Set((merged.cashClosures||[]).map(c=>c.dayKey));
+        // Un gasto anotado DESPUÉS del cierre del día (closedAt) se conserva,
+        // para poder sumarlo luego con "➕ Sumar al cierre". Cierres viejos
+        // sin closedAt: se mantiene el comportamiento anterior.
+        const closedAtByKey = new Map((merged.cashClosures||[]).map(c=>[c.dayKey, c.closedAt||0]));
         const dkOf = d=>{ const t=new Date(d); return t.getFullYear()+'-'+(t.getMonth()+1)+'-'+t.getDate(); };
-        merged.gastosDia = allGastos.filter(g=>!closedKeys.has(dkOf(g.date)));
+        merged.gastosDia = allGastos.filter(g=>{
+          const k = dkOf(g.date);
+          if(!closedAtByKey.has(k)) return true;
+          const closedAt = closedAtByKey.get(k);
+          return closedAt>0 && new Date(g.date).getTime() > closedAt;
+        });
         data.state = merged;
       }
       state = Object.assign({sales:[],quotes:[],clients:[],invoiceSeq:1000,quoteSeq:500,cashClosures:[],gastosDia:[],marcosRefs:null,vinilos:null,cotAdicionales:null,historico:null}, data.state);
@@ -3531,6 +3550,7 @@ function toggleRecogida(i){
   requireRecogidaPassword(!!c.recogida, ()=>{
     c.recogida = !c.recogida;
     c.recogidaDate = c.recogida ? new Date().toISOString() : null;
+    c.recogidaUpdatedAt = Date.now(); // el cambio más reciente (marcar o desmarcar) gana entre PCs
     saveState();
     renderReportes();
     toast(c.recogida ? '✅ Efectivo marcado como recogido' : 'Marca de recogida quitada');
@@ -4354,6 +4374,7 @@ function buildClosureSnapshot(allToday){
   const snapDate = cierreDateOverride ? new Date(cierreDateOverride) : new Date();
   return {dayKey:dayKeyOf(snapDate), date:snapDate, count:sales.length, ventas, byPay,
     ingresoEfectivo, ingresoDigital, gastos, gastosTotal, sueldo, sueldoMethod, efectivoGuardar,
+    closedAt: Date.now(), updatedAt: Date.now(),
     _ventasMigrated: true};
 }
 function doCloseCaja(overwrite){
@@ -4381,20 +4402,93 @@ document.getElementById('btnCerrarCaja').addEventListener('click', ()=>{
   const isSnapDay = (d)=> cierreDateOverride ? snapDate.toDateString()===new Date(d).toDateString() : isToday(d);
   const existing = state.cashClosures.find(c=>c.dayKey===snapDayKey);
   if(existing){
+    // Ya hay un cierre de ese día: en vez de sobrescribirlo (lo que perdía los
+    // gastos y el sueldo ya registrados), se ofrece SUMAR lo nuevo (saldos,
+    // abonos o ventas recibidos después del cierre, gastos o sueldo pendientes)
+    // al cierre que ya existe.
+    const idx = state.cashClosures.indexOf(existing);
     const fechaLabel = snapDate.toLocaleDateString('es-CO',{day:'2-digit',month:'long',year:'numeric'});
     document.getElementById('modalTitle').textContent = 'Ya existe un cierre para este día';
-    document.getElementById('modalBody').innerHTML = `<p style="font-size:13.5px;">El día <b>${fechaLabel}</b> ya tiene un cierre registrado.<br><br>¿Deseas <b>sobrescribirlo</b> con un nuevo cierre que incluya todas las ventas de ese día?</p>`;
-    document.getElementById('modalActions').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="closeModal();doCloseCaja(true)">Sobrescribir cierre</button>`;
+    document.getElementById('modalBody').innerHTML = `<p style="font-size:13.5px;">El día <b>${fechaLabel}</b> ya tiene un cierre registrado.<br><br>Si después del cierre recibiste saldos, abonos o ventas (o anotaste gastos o sueldo), puedes <b>sumarlos a ese mismo cierre</b>. Los gastos y el sueldo que ya tenía el cierre se conservan.</p>`;
+    document.getElementById('modalActions').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="closeModal();sumarAlCierre(${idx})">➕ Sumar al cierre</button>`;
     document.getElementById('modalDetail').classList.add('show');
     return;
   }
-  const hasSales = cierreDateOverride
-    ? state.sales.some(s=>s.status!=='Anulada' && isSnapDay(s.date))
-    : openSalesToday().length > 0;
-  if(!hasSales){ toast('No hay ventas para cerrar en esta fecha'); return; }
+  // Se puede cerrar si hay facturas nuevas O pagos recibidos (saldos y abonos
+  // de facturas de días anteriores también cuentan como ingreso del día).
+  const hasMovimientos = cierreDateOverride
+    ? state.sales.some(s=>s.status!=='Anulada' && (isSnapDay(s.date) || (s.payments||[]).some(p=>isSnapDay(p.date))))
+    : (openSalesToday().length > 0 || openPaymentsToday(false).length > 0);
+  if(!hasMovimientos){ toast('No hay ventas ni pagos para cerrar en esta fecha'); return; }
   doCloseCaja(false);
 });
 document.getElementById('btnImprimirCierre').addEventListener('click', ()=>{ printCierre(buildClosureSnapshot(false)); });
+
+// Suma al cierre YA EXISTENTE de un día todo lo que llegó después de hacerlo:
+// saldos/abonos/ventas recibidos, gastos anotados y sueldo pendiente.
+// - Los pagos se recalculan con TODOS los pagos del día (así nunca se cuentan
+//   dos veces), y la diferencia de efectivo se suma al efectivo del cierre
+//   (así se respeta cualquier ajuste manual hecho antes con "Editar").
+// - Los gastos y el sueldo que ya tenía el cierre se conservan y se suman
+//   los nuevos.
+// - Nunca borra facturas ni pagos: solo actualiza los totales del cierre.
+function sumarAlCierre(idx){
+  const c = state.cashClosures[idx];
+  if(!c){ toast('No se encontró el cierre'); return; }
+  const fresh = buildClosureSnapshot(true); // todos los pagos del día + gastos pendientes + sueldo del formulario
+  const oldEfe = (c.byPay && c.byPay['Efectivo']) || 0;
+  const deltaEfe = (fresh.byPay['Efectivo']||0) - oldEfe;
+  const deltaVentas = fresh.ventas - (c.ventas||0);
+  const nuevosGastos = fresh.gastos || [];
+  let sueldoSumado = 0, sueldoIgnorado = false;
+  if(fresh.sueldo>0 && fresh.sueldoMethod){
+    if(!(c.sueldo>0) || !c.sueldoMethod || c.sueldoMethod===fresh.sueldoMethod){
+      c.sueldo = (c.sueldo>0 ? c.sueldo : 0) + fresh.sueldo;
+      c.sueldoMethod = fresh.sueldoMethod;
+      sueldoSumado = fresh.sueldo;
+    } else {
+      sueldoIgnorado = true;
+    }
+  }
+  if(Math.abs(deltaVentas)<0.01 && Math.abs(deltaEfe)<0.01 && !nuevosGastos.length && !sueldoSumado){
+    toast(sueldoIgnorado
+      ? 'El cierre ya tiene sueldo pagado por otro medio. Ajústalo con ✏️ Editar en el historial de cierres.'
+      : 'No hay pagos, gastos ni sueldo nuevos para sumar a este cierre');
+    return;
+  }
+  const oldGuardar = c.efectivoGuardar||0;
+  c.byPay = fresh.byPay;
+  c.ventas = fresh.ventas;
+  c.count = Math.max(c.count||0, fresh.count||0);
+  c.ingresoEfectivo = (c.ingresoEfectivo||0) + deltaEfe;
+  c.ingresoDigital = fresh.ingresoDigital;
+  c.gastos = (c.gastos||[]).concat(nuevosGastos);
+  c.gastosTotal = c.gastos.reduce((a,g)=>a+(Number(g.value)||0),0);
+  c.efectivoGuardar = c.ingresoEfectivo - c.gastosTotal - (c.sueldoMethod==='Efectivo' ? (c.sueldo||0) : 0);
+  c.updatedAt = Date.now(); // para que la otra PC reciba esta versión actualizada
+  c.closedAt = Date.now();  // lo anotado desde ahora queda pendiente para el próximo "Sumar"
+  // Si el efectivo ya estaba marcado como recogido pero cambió el valor a
+  // guardar, se quita la marca para que confirmes la recogida del nuevo valor.
+  let recogidaQuitada = false;
+  if(c.recogida && Math.abs(c.efectivoGuardar-oldGuardar)>0.01){
+    c.recogida = false; c.recogidaDate = null; c.recogidaUpdatedAt = Date.now();
+    recogidaQuitada = true;
+  }
+  const isSnapDay = (d)=> cierreDateOverride ? new Date(cierreDateOverride).toDateString()===new Date(d).toDateString() : isToday(d);
+  state.gastosDia = state.gastosDia.filter(g=>!isSnapDay(g.date));
+  if(!cierreDateOverride) state.lastCierre = new Date().toISOString();
+  cierreDateOverride = null;
+  document.getElementById('sueldoValue').value=''; document.getElementById('sueldoMethod').value='';
+  saveState();
+  toast('✅ Sumado al cierre: '+money(deltaVentas)+' en pagos'
+    + (nuevosGastos.length ? ', '+nuevosGastos.length+' gasto(s)' : '')
+    + (sueldoSumado ? ', sueldo '+money(sueldoSumado) : '')
+    + (recogidaQuitada ? '. ⚠️ Se quitó la marca de "Recogida" porque cambió el efectivo a guardar.' : '')
+    + (sueldoIgnorado ? '. El sueldo no se sumó (el cierre ya tiene sueldo por otro medio).' : ''));
+  try{ printCierre(c); }
+  catch(e){ console.error('⚠️ Error imprimiendo el cierre:', e); toast('El cierre quedó actualizado, pero falló la impresión. Reimprime desde el historial.'); }
+  renderAll();
+}
 
 function openEditCierre(i){
   const c = state.cashClosures[i];
@@ -4484,6 +4578,7 @@ function saveEditCierre(i){
   c.sueldoMethod = method;
   c.efectivoGuardar = efectivo - gastosTotal - (method==='Efectivo'?sueldo:0);
   c._edited = true; // marca para que la migración no sobreescriba
+  c.updatedAt = Date.now(); // para que la otra PC reciba esta versión editada
   saveState();
   toast('Cierre actualizado');
   closeModal();
