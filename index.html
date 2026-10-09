@@ -309,7 +309,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     <button id="btnLogin" onclick="doLogin()">Ingresar</button>
     <div class="login-error" id="loginError"></div>
     <div class="login-status" id="loginStatus"></div>
-    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.08.02</div>
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim2);">v2026.08.03</div>
   </div>
 </div>
 
@@ -340,7 +340,7 @@ textarea.input{resize:vertical;min-height:60px;font-family:inherit;}
     </div>
     <div class="sidebar-foot">
       <div class="sync-badge" id="syncBadge"><span class="dot-sync" id="syncDot"></span><span id="syncText">Sincronizando…</span></div>
-      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.08.02</div>
+      <div style="font-size:10.5px;color:var(--text-dim2);padding:2px 0 4px;">Versión v2026.08.03</div>
       <button class="btn-logout" onclick="doLogout()">Cerrar sesión</button>
     </div>
   </aside>
@@ -1497,6 +1497,28 @@ function descontarStock(p, qty, talla){
 /* ================= LIBRO DE PAGOS ================= */
 function salePaid(s){ return (s.payments||[]).reduce((a,p)=>a+p.amount,0); }
 function saleSaldo(s){ return Math.max(0, s.total - salePaid(s)); }
+// Medios de pago que se pueden elegir al registrar o editar un pago.
+const PAY_METHODS = ["Efectivo","Nequi","Daviplata","BRE-B","QR","Tarjeta"];
+function payMethodOptions(selected){
+  const list = PAY_METHODS.slice();
+  if(selected && !list.includes(selected)) list.push(selected); // nunca perder un medio antiguo
+  return list.map(m=>`<option value="${m}" ${m===selected?'selected':''}>${m}</option>`).join('');
+}
+// Forma de pago REAL de una factura, sacada de sus pagos registrados (así, si
+// un pago se corrige con "Editar", la factura, la impresión y las
+// exportaciones muestran el medio corregido). Sin pagos: "Crédito" u otro
+// valor original guardado.
+function salePayLabel(s){
+  const ms = Array.from(new Set((s.payments||[]).map(p=>p.method).filter(Boolean)));
+  return ms.length ? ms.join(' + ') : (s.pay || 'Crédito');
+}
+// Totales por medio de pago para las gráficas: lo pagado va a su medio real
+// y lo que falta por pagar va a "Por cobrar".
+function addSalePayTotals(s, totals){
+  (s.payments||[]).forEach(p=>{ const m=p.method||'Efectivo'; totals[m]=(totals[m]||0)+(Number(p.amount)||0); });
+  const saldo = saleSaldo(s);
+  if(saldo>0.01) totals['Por cobrar']=(totals['Por cobrar']||0)+saldo;
+}
 function getDayPayments(dateObj){
   const out = [];
   state.sales.forEach(s=>{
@@ -2211,7 +2233,7 @@ document.getElementById('btnCheckout').addEventListener('click', ()=>{
   const saldo = saleSaldo(invoice);
   document.getElementById('checkoutSummary').innerHTML = `
     <p><b>Factura #${invoice.id}</b> · ${invoice.client}</p>
-    <p>Total: <b>${money(invoice.total)}</b> · ${invoice.pay}</p>
+    <p>Total: <b>${money(invoice.total)}</b> · ${salePayLabel(invoice)}</p>
     ${saldo>0?`<p>Abonado: <b>${money(salePaid(invoice))}</b> · Saldo pendiente: <b style="color:var(--yellow)">${money(saldo)}</b></p>`:''}
     <p>Estado: <span class="badge ${invoice.status==='Pagada'?'badge-green':'badge-yellow'}">${invoice.status}</span></p>`;
   document.getElementById('modalCheckout').classList.add('show');
@@ -2409,7 +2431,7 @@ function renderFacturas(){
       <td>${s.client}</td>
       <td>${(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td>
       <td><b>${money(s.total)}</b></td>
-      <td>${s.pay}</td>
+      <td>${salePayLabel(s)}</td>
       <td>${estado}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="viewInvoice(${s.id})">Ver</button></td>
     </tr>`;
@@ -2428,7 +2450,7 @@ function viewInvoice(id){
     ${s.discount?`<div class="cart-total-row mt8"><span>Subtotal</span><span>${money(s.subtotal)}</span></div>
       <div class="cart-total-row"><span>Descuento ${s.discount.type==='pct'?('('+s.discount.value+'%)'):''}</span><span style="color:var(--red)">- ${money(s.discount.amount)}</span></div>`:''}
     <div class="cart-total-row grand mt8"><span>Total</span><span>${money(s.total)}</span></div>
-    <p class="text-dim mt8">Forma de pago: ${s.pay} · Estado: ${s.status}</p>
+    <p class="text-dim mt8">Forma de pago: ${salePayLabel(s)} · Estado: ${s.status}</p>
     ${(s.payments&&s.payments.length)?`<div class="text-dim mt8"><b>Pagos recibidos:</b>${s.payments.map((p,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px;"><span>${p.date.toLocaleDateString('es-CO')} — <b>${money(p.amount)}</b> (${p.method})</span><button class="btn btn-ghost btn-sm" style="padding:1px 7px;font-size:11px;min-height:0;" onclick="editPago(${id},${i})">✏️ Editar</button></div>`).join('')}</div>`:''}
     ${saldo>0?`<p class="mt8"><b style="color:var(--yellow)">Saldo pendiente: ${money(saldo)}</b></p>`:''}
     ${s.notes?`<p class="text-dim mt8"><b>Observaciones:</b> ${s.notes}</p>`:''}
@@ -2842,12 +2864,7 @@ function openCobro(id){
     <label class="flabel">Valor recibido</label>
     <input class="input" id="cobroValor" type="number" min="0" value="${saldo}">
     <label class="flabel">¿Cómo pagó?</label>
-    <select class="input" id="cobroMetodo">
-      <option value="Efectivo">Efectivo</option>
-      <option value="Nequi">Nequi</option>
-      <option value="Daviplata">Daviplata</option>
-      <option value="Tarjeta">Tarjeta</option>
-    </select>`;
+    <select class="input" id="cobroMetodo">${payMethodOptions('Efectivo')}</select>`;
   document.getElementById('modalActions').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="confirmCobro(${id})">Registrar pago</button>`;
   document.getElementById('modalDetail').classList.add('show');
 }
@@ -2883,12 +2900,7 @@ function editPago(saleId, payIdx){
       <label class="flabel">Valor</label>
       <input class="input" id="editPagoValor" type="number" min="0" value="${p.amount}">
       <label class="flabel">Método de pago</label>
-      <select class="input" id="editPagoMetodo">
-        <option value="Efectivo" ${p.method==='Efectivo'?'selected':''}>Efectivo</option>
-        <option value="Nequi" ${p.method==='Nequi'?'selected':''}>Nequi</option>
-        <option value="Daviplata" ${p.method==='Daviplata'?'selected':''}>Daviplata</option>
-        <option value="Tarjeta" ${p.method==='Tarjeta'?'selected':''}>Tarjeta</option>
-      </select>`;
+      <select class="input" id="editPagoMetodo">${payMethodOptions(p.method)}</select>`;
     document.getElementById('modalActions').innerHTML = `
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" onclick="confirmEditPago(${saleId},${payIdx})">Guardar cambios</button>`;
@@ -3453,7 +3465,7 @@ document.getElementById('btnInformeCrecimiento')?.addEventListener('click', prin
 function renderReportes(){
   const validSales = state.sales.filter(s=>s.status!=='Anulada');
   const payTotals = {};
-  validSales.forEach(s=>{ payTotals[s.pay]=(payTotals[s.pay]||0)+s.total; });
+  validSales.forEach(s=>addSalePayTotals(s, payTotals));
   drawDoughnut('chartPago', chartPago, Object.keys(payTotals).length?Object.keys(payTotals):["Sin datos"], Object.keys(payTotals).length?Object.values(payTotals):[1], c=>chartPago=c);
 
   const prodCounts = {};
@@ -3627,7 +3639,7 @@ function renderReporteDetallado(){
     });
 
     const payTotalsRange = {};
-    sales.forEach(s=>{ payTotalsRange[s.pay]=(payTotalsRange[s.pay]||0)+s.total; });
+    sales.forEach(s=>addSalePayTotals(s, payTotalsRange));
     drawDoughnut('chartRepDetPago', chartRepDetPago, Object.keys(payTotalsRange).length?Object.keys(payTotalsRange):["Sin datos"], Object.keys(payTotalsRange).length?Object.values(payTotalsRange):[1], c=>chartRepDetPago=c);
   }
 
@@ -4744,7 +4756,7 @@ function exportExcel(){
         "Valor unitario": i.precio,
         "Subtotal": i.precio * i.qty,
         "Total factura": s.total,
-        "Medio de pago": s.pay,
+        "Medio de pago": salePayLabel(s),
         "Estado": s.status
       });
     });
@@ -4776,7 +4788,7 @@ function exportExcel(){
 }
 function exportCSV(){
   let csv = "FACTURAS\nNumero,Fecha,Cliente,Telefono,Total,Pago,Estado\n";
-  state.sales.forEach(s=>{ csv += `${s.id},${s.date.toLocaleDateString('es-CO')},${s.client},${s.phone||''},${s.total},${s.pay},${s.status}\n`; });
+  state.sales.forEach(s=>{ csv += `${s.id},${s.date.toLocaleDateString('es-CO')},${s.client},${s.phone||''},${s.total},${salePayLabel(s)},${s.status}\n`; });
   csv += "\nCLIENTES\nNombre,Telefono,Compras,TotalComprado,ProductoFavorito\n";
   state.clients.forEach(c=>{ csv += `${c.name},${c.phone||''},${c.purchases.length},${c.totalSpent},${favoriteProduct(c)}\n`; });
   downloadFile(csv, "studio_export.csv", "text/csv");
@@ -4785,7 +4797,7 @@ function exportCSV(){
 function exportXML(){
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<EstudioFotografico>\n  <Facturas>\n`;
   state.sales.forEach(s=>{
-    xml += `    <Factura numero="${s.id}" fecha="${s.date.toISOString()}" cliente="${escapeXML(s.client)}" total="${s.total}" pago="${s.pay}" estado="${s.status}">\n`;
+    xml += `    <Factura numero="${s.id}" fecha="${s.date.toISOString()}" cliente="${escapeXML(s.client)}" total="${s.total}" pago="${escapeXML(salePayLabel(s))}" estado="${s.status}">\n`;
     (s.items||[]).forEach(i=>{ xml += `      <Item nombre="${escapeXML(i.nombre)}" cantidad="${i.qty}" precio="${i.precio}"/>\n`; });
     xml += `    </Factura>\n`;
   });
@@ -4912,7 +4924,7 @@ function printTicket(sale){
       ${sale.discount?`<div style="display:flex;justify-content:space-between;font-size:12px;"><span>Subtotal</span><span>${money(sale.subtotal)}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:12px;"><span>Descuento</span><span>- ${money(sale.discount.amount)}</span></div>`:''}
       <div style="text-align:right;font-weight:bold;font-size:14px;">TOTAL: ${money(sale.total)}</div>
-      <div style="font-size:12px;">Forma de pago: ${sale.pay} · Estado: ${sale.status}</div>
+      <div style="font-size:12px;">Forma de pago: ${salePayLabel(sale)} · Estado: ${sale.status}</div>
       ${saleSaldo(sale)>0?`<div style="font-size:12px;">Abonado: ${money(salePaid(sale))} · Saldo: <b>${money(saleSaldo(sale))}</b></div>`:''}
       ${sale.notes?`<div style="text-align:left;font-size:11.5px;margin-top:6px;"><b>Observaciones:</b> ${sale.notes}</div>`:''}
       ${(sale.proofs&&sale.proofs.length)?`<div style="margin-top:10px;"><div style="font-size:11px;color:#444;">Comprobante(s) de pago digital:</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${sale.proofs.map(p=>`<img src="${p}" style="max-width:220px;max-height:220px;object-fit:contain;border:1px solid #ccc;margin-top:4px;">`).join('')}</div></div>`:''}
@@ -5174,7 +5186,7 @@ function printInvoiceLetter(id){
         </div>
         <div style="text-align:right;">
           <div style="font-weight:700;margin-bottom:4px;">Estado</div>
-          <div>${s.status}${s.pay?(' · '+s.pay):''}</div>
+          <div>${s.status} · ${salePayLabel(s)}</div>
         </div>
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px;">
